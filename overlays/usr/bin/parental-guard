@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_FS="${PARENTAL_OS_ROOT_FS:-}"
+CFG="${ROOT_FS}/etc/parental-os/config.env"
+if [[ -f "$CFG" ]]; then
+  # shellcheck disable=SC1090
+  source "$CFG"
+elif [[ -f /etc/parental-os/config.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/parental-os/config.env
+fi
+
+GROUP_NAME="${PARENTAL_OS_GROUP:-parental-users}"
+cmd="${1:-status}"
+
+status_cmd() {
+  echo "parental-os status"
+  echo "group: ${GROUP_NAME}"
+  if [[ -n "$ROOT_FS" ]]; then
+    echo "rootfs: $ROOT_FS (overlay/dev mode)"
+    echo "result: OK"
+    return 0
+  fi
+  if getent group "$GROUP_NAME" >/dev/null 2>&1; then
+    echo "group_exists: yes"
+  else
+    echo "group_exists: no"
+  fi
+  if systemctl is-active --quiet parental-guard-agent.service 2>/dev/null; then
+    echo "agent: active"
+  else
+    echo "agent: inactive_or_unavailable"
+  fi
+  echo "result: OK"
+}
+
+doctor_cmd() {
+  echo "parental-os doctor"
+  echo "expected_group: parental-users (config: ${GROUP_NAME})"
+  local issues=0
+  if [[ -z "$ROOT_FS" ]]; then
+    getent group "$GROUP_NAME" >/dev/null || { echo "MISSING group $GROUP_NAME"; issues=1; }
+    [[ -f /etc/sudoers.d/parental-os ]] || { echo "MISSING sudoers drop-in"; issues=1; }
+    [[ -x /usr/lib/parental-os/user-setup.sh ]] || { echo "MISSING user-setup.sh"; issues=1; }
+    [[ -f /usr/lib/parental-os/agent/server.py ]] || { echo "MISSING agent"; issues=1; }
+  else
+    [[ -f "$ROOT_FS/etc/sudoers.d/parental-os" ]] || { echo "MISSING sudoers in rootfs"; issues=1; }
+    echo "dev_mode_checks: basic file presence only"
+  fi
+  if [[ "$issues" -eq 0 ]]; then
+    echo "doctor: OK"
+    return 0
+  fi
+  echo "doctor: ISSUES"
+  return 1
+}
+
+case "$cmd" in
+  status) status_cmd ;;
+  doctor) doctor_cmd ;;
+  *) echo "usage: parental-guard status|doctor" >&2; exit 2 ;;
+esac
