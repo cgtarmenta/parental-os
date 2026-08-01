@@ -1,0 +1,14 @@
+[Unit]
+Description=parental-os LAN agent stub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/parental-os/config.env
+ExecStart=/usr/bin/python3 /usr/lib/parental-os/agent/server.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
