@@ -1,0 +1,14 @@
+Source: parental-guard
+Section: admin
+Priority: optional
+Maintainer: parental-os <cgtarmenta@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/cgtarmenta/parental-os
+
+Package: parental-guard
+Architecture: all
+Depends: ${misc:Depends}, bash, python3, sudo, polkitd | policykit-1, systemd
+Description: parental-os guard placeholder
+ Sudo/polkit policies, user inheritance hooks, and LAN agent stub
+ for parental-os images.

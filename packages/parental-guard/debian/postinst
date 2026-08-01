@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+groupadd --system parental-users 2>/dev/null || groupadd parental-users 2>/dev/null || true
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload || true
+  systemctl enable parental-guard.service parental-guard-agent.service || true
+fi
+exit 0
