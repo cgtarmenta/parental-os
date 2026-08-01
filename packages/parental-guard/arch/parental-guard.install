@@ -1,0 +1,9 @@
+post_install() {
+  groupadd --system parental-users 2>/dev/null || groupadd parental-users 2>/dev/null || true
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable parental-guard.service parental-guard-agent.service >/dev/null 2>&1 || true
+}
+
+post_upgrade() {
+  post_install
+}
