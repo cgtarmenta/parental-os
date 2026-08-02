@@ -8,7 +8,7 @@ Homepage: https://github.com/cgtarmenta/parental-os
 
 Package: parental-guard
 Architecture: all
-Depends: ${misc:Depends}, bash, python3, sudo, polkitd | policykit-1, systemd
+Depends: ${misc:Depends}, python3, sudo, polkitd | policykit-1, systemd
 Description: parental-os guard placeholder
  Sudo/polkit policies, user inheritance hooks, and LAN agent stub
  for parental-os images.

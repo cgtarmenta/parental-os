@@ -7,18 +7,6 @@ export DH_VERBOSE = 1
 override_dh_auto_build:
 	@echo "no build step"
 
-override_dh_auto_install:
-	# Prefer staged upstream tree next to debian/; fall back to monorepo src/.
-	mkdir -p debian/parental-guard
-	if [ -d etc ] && [ -d usr ]; then \
-		cp -a etc usr debian/parental-guard/; \
-	elif [ -d src ]; then \
-		cp -a src/. debian/parental-guard/; \
-	elif [ -d ../src ]; then \
-		cp -a ../src/. debian/parental-guard/; \
-	else \
-		echo "error: no package payload (etc/usr, src, or ../src)" >&2; \
-		exit 1; \
-	fi
-	chmod 440 debian/parental-guard/etc/sudoers.d/parental-os
-	mkdir -p debian/parental-guard/var/lib/parental-os
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0440 debian/parental-guard/etc/sudoers.d/parental-os
