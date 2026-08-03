@@ -16,6 +16,11 @@ srcpkgs/
 pkg/
 packages/parental-guard/arch/pkg/
 packages/parental-guard/arch/src/
+packages/parental-guard/debian/*.debhelper*
+packages/parental-guard/debian/.debhelper/
+packages/parental-guard/debian/files
+packages/parental-guard/debian/parental-guard/
+packages/parental-guard/src/
 distros/ubuntu/cache/
 distros/ubuntu/chroot/
 distros/ubuntu/binary/

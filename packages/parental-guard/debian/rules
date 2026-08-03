@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	@echo "no build step"
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0440 debian/parental-guard/etc/sudoers.d/parental-os
