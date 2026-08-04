@@ -137,6 +137,12 @@ stage_official_tree() {
 
   append_parental_repo_stanza "$staged_dir/archiso/pacman.conf"
   append_parental_repo_stanza "$staged_dir/archiso/airootfs/etc/pacman-more.conf"
+  local live_pacman_conf="$staged_dir/archiso/airootfs/etc/pacman.conf"
+  if [[ ! -f "$live_pacman_conf" ]]; then
+    mkdir -p "${live_pacman_conf%/*}"
+    cp "$staged_dir/archiso/pacman.conf" "$live_pacman_conf"
+  fi
+  append_parental_repo_stanza "$live_pacman_conf"
 
   mkdir -p "$staged_dir/archiso/airootfs/srv/parental-os-repo"
   cp -a "$repo_dir/." "$staged_dir/archiso/airootfs/srv/parental-os-repo/"

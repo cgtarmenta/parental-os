@@ -35,6 +35,7 @@ from pathlib import Path
 PARENTAL_GUARD_PKG = "parental-guard"
 PARENTAL_GUARD_SERVICE = "parental-guard.service"
 PARENTAL_GUARD_AGENT_SERVICE = "parental-guard-agent.service"
+CLEANUP_SCRIPT_PATH = "/etc/calamares/scripts/remove-parental-os-repo"
 
 # The temporary repository stanza added to the live image pacman.conf. The
 # target cleanup must remove exactly this stanza and nothing else.
@@ -77,9 +78,30 @@ def add_package_to_pacstrap(conf_path: Path) -> None:
         )
 
     insertion = f"{match.group(1)}{match.group(2)}{PARENTAL_GUARD_PKG}\n"
-    new_content = content[: match.start()] + insertion + content[match.end() :]
+    new_content = content[: match.start()] + insertion + content[match.start(2) :]
     conf_path.write_text(new_content, encoding="utf-8")
     print(f"apply-parental-overlay: added {PARENTAL_GUARD_PKG} to {conf_path}")
+
+
+def add_cleanup_to_postinstall_files(conf_path: Path) -> None:
+    """Copy the cleanup hook into the target before chrooted shellprocess runs."""
+    content = load_yaml(conf_path)
+    cleanup_entry = f'  - "{CLEANUP_SCRIPT_PATH}"'
+    if cleanup_entry in content:
+        return
+
+    pattern = r"(postInstallFiles:\s*\n(?:\s*#\s*[^\n]*\n)*\s*)(  - )"
+    match = re.search(pattern, content)
+    if not match:
+        fail(
+            f"could not find postInstallFiles list in {conf_path}; "
+            "upstream layout may have changed"
+        )
+
+    insertion = f"{match.group(1)}{cleanup_entry}\n"
+    new_content = content[: match.start()] + insertion + content[match.start(2) :]
+    conf_path.write_text(new_content, encoding="utf-8")
+    print(f"apply-parental-overlay: added {CLEANUP_SCRIPT_PATH} to {conf_path}")
 
 
 def add_services_to_systemd(conf_path: Path) -> None:
@@ -160,8 +182,8 @@ def wire_shellprocess_cleanup(calamares_src_dir: Path) -> None:
         / "src/modules/shellprocess/shellprocess_cleanup_calamares.conf"
     )
     content = load_yaml(shellprocess_conf)
-    command = "    - /etc/calamares/scripts/remove-parental-os-repo /etc/pacman.conf"
-    if "/etc/calamares/scripts/remove-parental-os-repo /etc/pacman.conf" in content:
+    command = f"    - {CLEANUP_SCRIPT_PATH} /etc/pacman.conf"
+    if f"{CLEANUP_SCRIPT_PATH} /etc/pacman.conf" in content:
         return
     marker = "script:\n"
     if marker not in content:
@@ -297,6 +319,7 @@ def transform_source(calamares_src_dir: Path) -> None:
         calamares_src_dir / "src/modules/services-systemd/services-systemd.conf"
     )
     add_package_to_pacstrap(pacstrap_conf)
+    add_cleanup_to_postinstall_files(pacstrap_conf)
     add_services_to_systemd(services_conf)
     install_target_cleanup(calamares_src_dir)
     wire_shellprocess_cleanup(calamares_src_dir)

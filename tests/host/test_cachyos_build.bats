@@ -204,6 +204,10 @@ EOF
 [cachyos]
 Include = /etc/pacman.d/cachyos-mirrorlist
 EOF
+  cat >"$destination/archiso/airootfs/etc/pacman.conf" <<'EOF'
+[cachyos]
+Include = /etc/pacman.d/cachyos-mirrorlist
+EOF
   cat >"$destination/archiso/profiledef.sh" <<'EOF'
 file_permissions=(
   ["/usr/local/bin/calamares-online.sh"]="0:0:755"
@@ -313,6 +317,10 @@ EOF
   [ -x "$live/usr/local/lib/parental-os/apply-parental-overlay.py" ]
   [ -f "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf" ]
   grep -qx '  - parental-guard' "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"
+  grep -qx '  - base' "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"
+  grep -qx '  - cachyos-hooks' "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"
+  grep -q '  - "/etc/calamares/scripts/remove-parental-os-repo"' \
+    "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"
   grep -q '/etc/calamares/scripts/remove-parental-os-repo /etc/pacman.conf' \
     "$live/usr/share/calamares/src/modules/shellprocess/shellprocess_cleanup_calamares.conf"
   first_hash="$(find "$live" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
@@ -343,6 +351,10 @@ EOF
   [ -f "$live/etc/calamares/modules/shellprocess_cleanup_calamares.conf" ]
   [ -x "$live/etc/calamares/scripts/remove-parental-os-repo" ]
   grep -qx '  - parental-guard' "$live/etc/calamares/modules/pacstrap.conf"
+  grep -qx '  - base' "$live/etc/calamares/modules/pacstrap.conf"
+  grep -qx '  - cachyos-hooks' "$live/etc/calamares/modules/pacstrap.conf"
+  grep -q '  - "/etc/calamares/scripts/remove-parental-os-repo"' \
+    "$live/etc/calamares/modules/pacstrap.conf"
   grep -q 'parental-guard.service' "$live/etc/calamares/modules/services-systemd.conf"
   grep -q 'parental-guard-agent.service' "$live/etc/calamares/modules/services-systemd.conf"
   grep -q '/etc/calamares/scripts/remove-parental-os-repo /etc/pacman.conf' \
@@ -477,6 +489,8 @@ EOF
   grep -q '^# BEGIN parental-os temporary repository$' "$staged/archiso/pacman.conf"
   grep -q '^# BEGIN parental-os temporary repository$' \
     "$staged/archiso/airootfs/etc/pacman-more.conf"
+  grep -q '^# BEGIN parental-os temporary repository$' \
+    "$staged/archiso/airootfs/etc/pacman.conf"
 
   export OFFICIAL_INVOCATION_LOG="$invocation"
   export OFFICIAL_USER_LOG="$official_user"
@@ -486,6 +500,30 @@ EOF
   [ "$(cat "$official_user")" = "builder" ]
   [ "$(cat "$staged/archiso/airootfs/etc/edition-tag")" = "desktop" ]
   [ -s "$staged/archiso/airootfs/etc/version-tag" ]
+}
+
+@test "official staging creates live pacman.conf when upstream omits it" {
+  live="$TEST_TMP/live"
+  calamares="$TEST_TMP/calamares"
+  repo="$TEST_TMP/repo"
+  staged="$TEST_TMP/staged"
+  _make_live_fixture desktop packages_desktop.x86_64 \
+    cachyos-calamares-next \
+    'sudo pacman -Sy --noconfirm cachyos-calamares-next' "$live"
+  rm "$live/archiso/airootfs/etc/pacman.conf"
+  _copy_calamares_fixture "$calamares"
+  mkdir -p "$repo"
+  printf 'package\n' >"$repo/parental-guard.pkg.tar.zst"
+
+  export CACHYOS_CONTAINER_LIB_ONLY=1
+  # shellcheck source=/dev/null
+  source "$TEST_ROOT/distros/cachyos/container/build-edition.sh"
+  run stage_official_tree desktop "$live" "$calamares" "$repo" "$staged"
+  [ "$status" -eq 0 ]
+  [ -f "$staged/archiso/airootfs/etc/pacman.conf" ]
+  grep -q '^# BEGIN parental-os temporary repository$' \
+    "$staged/archiso/airootfs/etc/pacman.conf"
+  grep -q '^\[cachyos\]$' "$staged/archiso/airootfs/etc/pacman.conf"
 }
 
 @test "official staging cleanup handles root-owned profile-work with sudo rm fallback" {
