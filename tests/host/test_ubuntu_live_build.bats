@@ -18,9 +18,15 @@ function ubuntu_live_build_dockerfile_exists_and_installs_required_tools { # @te
   f="$TEST_ROOT/distros/ubuntu/docker/Dockerfile"
   [[ -f "$f" ]]
   grep -q 'live-build' "$f"
+  grep -q 'live-boot' "$f"
+  grep -q 'live-config' "$f"
+  grep -q 'live-tools' "$f"
   grep -q 'debootstrap' "$f"
   grep -q 'squashfs-tools' "$f"
   grep -q 'xorriso' "$f"
+  grep -q 'curl' "$f"
+  grep -q 'gnupg' "$f"
+  grep -q 'fdisk' "$f"
 }
 
 function ubuntu_auto_config_is_executable_and_configures_amd64_iso_hybrid_image { # @test
@@ -101,10 +107,26 @@ function build_ubuntu_sh_runs_live_build_privileged_and_writes_build_log { # @te
   grep -q 'tee' "$f"
 }
 
+function build_ubuntu_sh_runs_lb_config_before_lb_build { # @test
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  grep -q 'lb config' "$f"
+  config_line="$(grep -n 'lb config' "$f" | cut -d: -f1 | head -n1)"
+  build_line="$(grep -n 'lb build' "$f" | cut -d: -f1 | head -n1)"
+  [[ -n "$config_line" ]]
+  [[ -n "$build_line" ]]
+  [ "$config_line" -lt "$build_line" ]
+}
+
 function build_ubuntu_sh_copies_generated_iso_artifacts_to_out_ubuntu { # @test
   f="$TEST_ROOT/scripts/build-ubuntu.sh"
   grep -Eq 'cp .*\.iso' "$f"
   grep -q 'out/ubuntu' "$f"
+}
+
+function build_ubuntu_sh_generates_portable_basename_checksums { # @test
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  grep -Eq '\(cd "\$OUT/ubuntu" && sha256sum "\$\(basename "\$iso"\)"\)' "$f"
+  ! grep -Eq 'sha256sum "\$OUT/ubuntu/' "$f"
 }
 
 skip_if_no_docker() {
@@ -119,5 +141,18 @@ function docker_build_succeeds_for_the_ubuntu_live_build_image { # @test
   [[ -f "$f" ]]
   run docker_cli build \
     -t parental-os-ubuntu-live-builder:test "$TEST_ROOT/distros/ubuntu/docker"
+  [ "$status" -eq 0 ]
+}
+
+function docker_lb_config_smoke_has_no_missing_fdisk_warning { # @test
+  skip_if_no_docker
+  run docker_cli build \
+    -t parental-os-ubuntu-live-builder:test "$TEST_ROOT/distros/ubuntu/docker"
+  [ "$status" -eq 0 ]
+
+  run docker_cli run --rm \
+    --mount type=bind,source="$TEST_ROOT/distros/ubuntu/auto",destination=/tmp/parental-auto,readonly \
+    parental-os-ubuntu-live-builder:test \
+    bash -lc 'set -euo pipefail; mkdir -p /tmp/lb/auto; cp -a /tmp/parental-auto/. /tmp/lb/auto/; cd /tmp/lb; output="$(auto/config 2>&1)"; printf "%s\n" "$output"; ! printf "%s\n" "$output" | grep -q "Can'"'"'t process file /sbin/fdisk"; test -d config'
   [ "$status" -eq 0 ]
 }

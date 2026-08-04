@@ -43,7 +43,13 @@ run_live_build() {
     --privileged \
     --mount type=bind,source="$LB_DIR",destination=/build,bind-propagation=rprivate \
     "$BUILDER_IMAGE_TAG" \
-    bash -lc 'cd /build && lb clean --purge || true && lb build'
+    bash -lc '
+      set -euo pipefail
+      cd /build
+      lb clean --purge || true
+      lb config
+      lb build
+    '
 }
 
 copy_iso_artifacts() {
@@ -52,7 +58,7 @@ copy_iso_artifacts() {
   [[ "${#iso_files[@]}" -gt 0 ]] || die "no ISO produced under $LB_DIR"
   cp -a "$LB_DIR"/*.iso "$OUT/ubuntu/"
   for iso in "${iso_files[@]}"; do
-    sha256sum "$OUT/ubuntu/$(basename "$iso")" \
+    (cd "$OUT/ubuntu" && sha256sum "$(basename "$iso")") \
       >"$OUT/ubuntu/$(basename "$iso").sha256"
   done
   shopt -u nullglob
