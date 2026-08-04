@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+DEB_DIR=/root/parental-os-debs
+set -- "$DEB_DIR"/parental-guard_*.deb
+if [ ! -e "$1" ]; then
+    echo "parental-os: missing local parental-guard deb in $DEB_DIR" >&2
+    exit 1
+fi
+
+dpkg -i "$@" || apt-get -f install -y
+
+if ! getent group parental-users >/dev/null 2>&1; then
+    groupadd --system parental-users || groupadd parental-users
+fi
+
+if ! id child >/dev/null 2>&1; then
+    useradd -m -s /bin/bash child
+    passwd --lock child >/dev/null 2>&1 || true
+fi
+
+/usr/lib/parental-os/user-setup.sh child
+systemctl enable parental-guard.service parental-guard-agent.service >/dev/null 2>&1 || true
+
+rm -rf "$DEB_DIR"

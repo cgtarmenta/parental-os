@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+lb config noauto \
+  --mode ubuntu \
+  --distribution jammy \
+  --archive-areas "main restricted universe multiverse" \
+  --architectures amd64 \
+  --binary-images iso-hybrid \
+  --bootappend-live "boot=live components username=child hostname=parental-os" \
+  "${@}"
