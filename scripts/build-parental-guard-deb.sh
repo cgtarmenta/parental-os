@@ -14,19 +14,28 @@ ensure_out_dirs
 require_cmd docker
 require_cmd rsync
 
-# Refresh the upstream payload from overlays so src/ matches the overlay tree.
+OUT="$(out_root)"
+
+# Refresh the upstream payload from overlays into the out/ staging tree.
 "$ROOT/scripts/sync-package-from-overlays.sh"
 
 PKGVER="0.1.0"
 SRCNAME="parental-guard"
-STAGE_PARENT="$ROOT/out/deb-src"
+STAGE_PARENT="$OUT/deb-src"
 STAGE="$STAGE_PARENT/${SRCNAME}-${PKGVER}"
-DEB_OUT="$ROOT/out/packages"
-rm -rf "$STAGE_PARENT"
+DEB_OUT="$OUT/packages"
+# Clean the staging parent. If root-owned files from a previous Docker build
+# exist, the host rm may fail; fall back to a Docker container for cleanup.
+if ! rm -rf "$STAGE_PARENT" 2>/dev/null; then
+  log "host rm failed (root-owned files); cleaning via Docker container..."
+  docker_cli run --rm -v "$OUT:/cleanout" alpine:latest \
+    sh -c "rm -rf /cleanout/deb-src && echo cleaned" >/dev/null 2>&1 || true
+  rm -rf "$STAGE_PARENT" 2>/dev/null || true
+fi
 mkdir -p "$STAGE" "$DEB_OUT"
 
 # Upstream filesystem payload at package root for dh_install/.install mapping.
-rsync -a "$ROOT/packages/parental-guard/src/" "$STAGE/"
+rsync -a "$OUT/cachyos/staging/parental-guard/src/" "$STAGE/"
 # Canonical debian/ metadata copied unchanged (Finding 3: no rewrites).
 rsync -a "$ROOT/packages/parental-guard/debian/" "$STAGE/debian/"
 
@@ -45,7 +54,7 @@ tar -czf "$ORIG_TGZ" -C "$STAGE_PARENT" \
   "${SRCNAME}-${PKGVER}"
 
 log "building deb in docker (debian:bookworm) from $STAGE"
-docker run --rm \
+docker_cli run --rm \
   -v "$STAGE_PARENT:/build" \
   -w "/build/${SRCNAME}-${PKGVER}" \
   debian:bookworm \
@@ -58,7 +67,7 @@ docker run --rm \
     dpkg-source -b .
     dpkg-buildpackage -us -uc -b
     ls -la /build
-  ' 2>&1 | tee "$ROOT/out/logs/parental-guard-deb-build.log"
+  ' 2>&1 | tee "$OUT/logs/parental-guard-deb-build.log"
 
 # Copy the binary .deb and the source .dsc into out/packages.
 shopt -s nullglob
