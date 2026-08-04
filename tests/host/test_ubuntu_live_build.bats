@@ -36,9 +36,18 @@ function ubuntu_auto_config_is_executable_and_configures_amd64_iso_hybrid_image 
   grep -q 'lb config noauto' "$f"
   grep -Eq -- '--architectures[[:space:]]+amd64' "$f"
   grep -Eq -- '--binary-images[[:space:]]+iso-hybrid' "$f"
+  grep -Eq -- '--zsync[[:space:]]+false' "$f"
+  grep -Eq -- '--initramfs[[:space:]]+live-boot' "$f"
+  grep -Eq -- '--initsystem[[:space:]]+systemd' "$f"
   grep -q 'bootappend-live' "$f"
   grep -q 'username=child' "$f"
   grep -q 'hostname=parental-os' "$f"
+}
+
+function ubuntu_auto_config_uses_available_syslinux_theme_for_jammy { # @test
+  f="$TEST_ROOT/distros/ubuntu/auto/config"
+  grep -Eq -- '--syslinux-theme[[:space:]]+live-build' "$f"
+  ! grep -q 'ubuntu-oneiric' "$f"
 }
 
 function ubuntu_package_list_includes_desktop_baseline_and_vm_remote_support { # @test
@@ -144,6 +153,17 @@ function docker_build_succeeds_for_the_ubuntu_live_build_image { # @test
   [ "$status" -eq 0 ]
 }
 
+function docker_ubuntu_live_builder_patches_jammy_live_build_syslinux_paths { # @test
+  skip_if_no_docker
+  run docker_cli build \
+    -t parental-os-ubuntu-live-builder:test "$TEST_ROOT/distros/ubuntu/docker"
+  [ "$status" -eq 0 ]
+
+  run docker_cli run --rm parental-os-ubuntu-live-builder:test \
+    bash -lc 'set -euo pipefail; test "$(readlink /usr/share/live/build/bootloaders/isolinux/isolinux.bin)" = "/usr/lib/ISOLINUX/isolinux.bin"; test "$(readlink /usr/share/live/build/bootloaders/isolinux/vesamenu.c32)" = "/usr/lib/syslinux/modules/bios/vesamenu.c32"; grep -q "chroot/usr/lib/ISOLINUX/isolinux.bin isolinux" /usr/lib/live/build/lb_binary_syslinux; grep -q "chroot/usr/bin/rsvg-convert librsvg2-bin" /usr/lib/live/build/lb_binary_syslinux; grep -q "rsvg-convert --format png --height 480 --width 640 --output splash.png splash.svg" /usr/lib/live/build/lb_binary_syslinux; grep -q "^if \[ \"\${LB_SYSLINUX_THEME}\" != \"live-build\" \]$" /usr/lib/live/build/lb_binary_syslinux; grep -q "chroot/usr/bin/isohybrid syslinux-utils" /usr/lib/live/build/lb_binary_iso'
+  [ "$status" -eq 0 ]
+}
+
 function docker_lb_config_smoke_has_no_missing_fdisk_warning { # @test
   skip_if_no_docker
   run docker_cli build \
@@ -153,6 +173,6 @@ function docker_lb_config_smoke_has_no_missing_fdisk_warning { # @test
   run docker_cli run --rm \
     --mount type=bind,source="$TEST_ROOT/distros/ubuntu/auto",destination=/tmp/parental-auto,readonly \
     parental-os-ubuntu-live-builder:test \
-    bash -lc 'set -euo pipefail; mkdir -p /tmp/lb/auto; cp -a /tmp/parental-auto/. /tmp/lb/auto/; cd /tmp/lb; output="$(auto/config 2>&1)"; printf "%s\n" "$output"; ! printf "%s\n" "$output" | grep -q "Can'"'"'t process file /sbin/fdisk"; test -d config'
+    bash -lc 'set -euo pipefail; mkdir -p /tmp/lb/auto; cp -a /tmp/parental-auto/. /tmp/lb/auto/; cd /tmp/lb; output="$(auto/config 2>&1)"; printf "%s\n" "$output"; ! printf "%s\n" "$output" | grep -q "Can'"'"'t process file /sbin/fdisk"; grep -q "^LB_BOOTLOADER=\"syslinux\"$" config/binary; grep -q "^LB_SYSLINUX_THEME=\"live-build\"$" config/binary; ! grep -R "ubuntu-oneiric" config'
   [ "$status" -eq 0 ]
 }
