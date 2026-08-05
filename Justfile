@@ -26,6 +26,12 @@ package-deb:
 test-qemu target="all":
   "{{root}}/scripts/test-qemu.sh" "{{target}}"
 
+qemu-browser target="ubuntu":
+  "{{root}}/scripts/qemu-browser.sh" "{{target}}"
+
+qemu-browser-down:
+  "{{root}}/scripts/qemu-browser.sh" down
+
 clean:
   rm -rf "{{root}}/out"/*
   mkdir -p "{{root}}/out/ubuntu" "{{root}}/out/cachyos" "{{root}}/out/packages" "{{root}}/out/logs" "{{root}}/out/qemu"
