@@ -513,6 +513,56 @@ EOF
   [ ! -e "$target_root/srv/parental-os-repo" ]
 }
 
+@test "generated cleanup removes installed parental-os repo from pacman-more" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  target_root="$TEST_TMP/target-root"
+  target="$target_root/etc/pacman.conf"
+  target_more="$target_root/etc/pacman-more.conf"
+  _copy_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+  cat >"$live/usr/local/bin/calamares-online.sh" <<'EOF'
+#!/usr/bin/env bash
+sudo pacman -Sy --noconfirm cachyos-calamares-next
+exec pkexec-wrapper calamares
+EOF
+  _run_transformer_source "$calamares" "$live" cachyos-calamares-next
+  [ "$status" -eq 0 ]
+  _run_transformer_runtime "$live/usr/share/calamares" "$live"
+  [ "$status" -eq 0 ]
+  mkdir -p "$target_root/etc" "$target_root/srv/parental-os-repo"
+  printf 'db\n' >"$target_root/srv/parental-os-repo/parental-os.db"
+  cat >"$target" <<'EOF'
+[core]
+Server = https://core.invalid/
+
+Include = /etc/pacman-more.conf
+EOF
+  cat >"$target_more" <<'EOF'
+[extra]
+Server = https://extra.invalid/
+
+[parental-os]
+SigLevel = Optional TrustAll
+Server = http://127.0.0.1:8765
+
+[parental-os-archive]
+Server = https://archive.invalid/
+EOF
+  grep -q 'http://127.0.0.1:8765' "$target_more"
+
+  run "$live/etc/calamares/scripts/remove-parental-os-repo" "$target"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^\[parental-os\]$' "$target")" -eq 0 ]
+  [ "$(grep -c '^\[parental-os\]$' "$target_more")" -eq 0 ]
+  [ "$(grep -c 'http://127.0.0.1:8765' "$target_more")" -eq 0 ]
+  grep -q '^\[core\]$' "$target"
+  grep -q '^\[extra\]$' "$target_more"
+  grep -q '^\[parental-os-archive\]$' "$target_more"
+  grep -q 'https://archive.invalid/' "$target_more"
+  [ ! -e "$target_root/srv/parental-os-repo" ]
+}
+
 @test "official staging preserves prepare_profile and invokes buildiso.sh" {
   live="$TEST_TMP/live"
   calamares="$TEST_TMP/calamares"

@@ -75,9 +75,15 @@ kill_qemu_pidfile() {
     return 0
   fi
 
-  pid="$(<"$pidfile")"
-  start_time="$(qemu_pid_start_time "$pid")"
+  read -r pid start_time _ <"$pidfile" || true
+  start_time="${start_time:-}"
   if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    if [[ -z "$start_time" ]]; then
+      log "warning: $pidfile lacks a stored process start time; removing stale pidfile without killing"
+      rm -f "$pidfile"
+      return 0
+    fi
+
     if ! qemu_pid_is_same_process "$pid" "$start_time"; then
       log "warning: $pidfile points to non-QEMU process $pid; removing stale pidfile without killing"
       rm -f "$pidfile"
@@ -195,6 +201,8 @@ run_target() {
   pid="$(<"$pidfile")"
   [[ "$pid" =~ ^[0-9]+$ ]] || die "$target: QEMU wrote an invalid pidfile: $pidfile; see serial log: $log_file"
   start_time="$(qemu_pid_start_time "$pid")"
+  [[ -n "$start_time" ]] || die "$target: could not read QEMU process start time: $pidfile; see serial log: $log_file"
+  printf '%s %s\n' "$pid" "$start_time" >"$pidfile"
   qemu_pid_is_same_process "$pid" "$start_time" \
     || die "$target: pidfile does not point to qemu-system-x86_64: $pidfile; see serial log: $log_file"
   QEMU_PIDFILES+=("$pidfile")

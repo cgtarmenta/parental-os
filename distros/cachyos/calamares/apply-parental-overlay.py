@@ -190,18 +190,30 @@ def install_target_cleanup(calamares_src_dir: Path) -> None:
         f'  /etc/pacman.conf) target_root="/" ;;\n'
         f'  */etc/pacman.conf) target_root="${{target_pacman_conf%/etc/pacman.conf}}" ;;\n'
         f'esac\n'
-        f"# Remove the stanza block: from [{TEMP_REPO_STANZA_MARKER}] to the\n"
-        f"# next stanza header or EOF.\n"
-        f'python3 - "$target_pacman_conf" <<\'PYEOF\'\n'
+        f'cleanup_targets=("$target_pacman_conf")\n'
+        f'if [[ -n "$target_root" ]]; then\n'
+        f'  if [[ "$target_root" == "/" ]]; then\n'
+        f'    cleanup_targets+=("/etc/pacman-more.conf")\n'
+        f'  else\n'
+        f'    cleanup_targets+=("$target_root/etc/pacman-more.conf")\n'
+        f'  fi\n'
+        f'fi\n'
+        f"# Remove the exact temporary [parental-os] repo section from any\n"
+        f"# installed pacman config that may have inherited the live config.\n"
+        f'python3 - "${{cleanup_targets[@]}}" <<\'PYEOF\'\n'
         f'import re, sys\n'
-        f'path = sys.argv[1] if len(sys.argv) > 1 else "/etc/pacman.conf"\n'
-        f"with open(path) as f:\n"
-        f"    content = f.read()\n"
-        f"# Remove the marked temporary [parental-os] stanza only.\n"
-        f"pattern = r'# BEGIN parental-os temporary repository\\n\\[parental-os\\]\\n(?:[^\\n]*\\n)*?# END parental-os temporary repository\\n?'\n"
-        f"new = re.sub(pattern, '', content)\n"
-        f"with open(path, 'w') as f:\n"
-        f"    f.write(new)\n"
+        f"marked = r'^# BEGIN parental-os temporary repository\\n\\[parental-os\\]\\n.*?^# END parental-os temporary repository\\n?'\n"
+        f"unmarked = r'^\\[parental-os\\]\\n.*?(?=^\\[[^]\\n]+\\]\\n|\\Z)'\n"
+        f"for path in sys.argv[1:]:\n"
+        f"    try:\n"
+        f"        with open(path) as f:\n"
+        f"            content = f.read()\n"
+        f"    except FileNotFoundError:\n"
+        f"        continue\n"
+        f"    new = re.sub(marked, '', content, flags=re.MULTILINE | re.DOTALL)\n"
+        f"    new = re.sub(unmarked, '', new, flags=re.MULTILINE | re.DOTALL)\n"
+        f"    with open(path, 'w') as f:\n"
+        f"        f.write(new)\n"
         f"PYEOF\n"
         f'if [[ -n "$target_root" ]]; then\n'
         f'  if [[ "$target_root" == "/" ]]; then\n'

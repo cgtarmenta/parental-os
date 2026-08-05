@@ -323,6 +323,13 @@ teardown() {
   [[ "$script" == *'qemu_pid_start_time'* ]]
 }
 
+@test "test-qemu stores pid start time before cleanup can kill qemu" {
+  script="$(<"$PARENTAL_OS_ROOT/scripts/test-qemu.sh")"
+  [[ "$script" == *'printf '\''%s %s\n'\'' "$pid" "$start_time" >"$pidfile"'* ]]
+  [[ "$script" == *'if [[ -z "$start_time" ]]; then'* ]]
+  [[ "$script" == *'removing stale pidfile without killing'* ]]
+}
+
 @test "test-qemu wait loop validates qemu identity beyond kill zero" {
   script="$(<"$PARENTAL_OS_ROOT/scripts/test-qemu.sh")"
   wait_body="${script#*'wait_for_guest()'}"
