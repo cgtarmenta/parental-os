@@ -115,9 +115,10 @@ EOF
 
 stage_official_tree() {
   local edition="$1" live_iso_dir="$2" calamares_dir="$3" repo_dir="$4" staged_dir="$5"
-  local packages_file calamares_package
+  local packages_file calamares_package required_packages pkg service wants_dir
   packages_file="$(cachyos_metadata_value "$edition" packages_file)" || return 1
   calamares_package="$(cachyos_metadata_value "$edition" calamares_package)" || return 1
+  required_packages="$(cachyos_metadata_value "$edition" required_packages)" || return 1
 
   [[ -d "$live_iso_dir" ]] || die "Live ISO source not found: $live_iso_dir"
   [[ -d "$calamares_dir" ]] || die "Calamares source not found: $calamares_dir"
@@ -131,9 +132,23 @@ stage_official_tree() {
 
   [[ -f "$staged_dir/buildiso.sh" ]] || die "official buildiso.sh not found in $staged_dir"
   [[ -f "$staged_dir/archiso/$packages_file" ]] || die "packages file not found: $packages_file"
-  if ! grep -qx 'parental-guard' "$staged_dir/archiso/$packages_file"; then
-    printf 'parental-guard\n' >>"$staged_dir/archiso/$packages_file"
-  fi
+  for pkg in $required_packages; do
+    if ! grep -qx "$pkg" "$staged_dir/archiso/$packages_file"; then
+      printf '%s\n' "$pkg" >>"$staged_dir/archiso/$packages_file"
+    fi
+  done
+
+  wants_dir="$staged_dir/archiso/airootfs/etc/systemd/system/multi-user.target.wants"
+  mkdir -p "$wants_dir"
+  for service in \
+    cloud-init-local.service \
+    cloud-init.service \
+    cloud-config.service \
+    cloud-final.service \
+    sshd.service \
+    qemu-guest-agent.service; do
+    ln -sfn "/usr/lib/systemd/system/$service" "$wants_dir/$service"
+  done
 
   append_parental_repo_stanza "$staged_dir/archiso/pacman.conf"
   append_parental_repo_stanza "$staged_dir/archiso/airootfs/etc/pacman-more.conf"
@@ -169,7 +184,7 @@ run_official_build() {
 clean_edition_artifacts() {
   local edition_out="$1"
   mkdir -p "$edition_out"
-  rm -f \
+  rm -rf \
     "$edition_out"/*.iso \
     "$edition_out"/*.iso.sha256 \
     "$edition_out"/pkglist.x86_64.txt \

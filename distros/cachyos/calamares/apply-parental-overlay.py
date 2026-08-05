@@ -7,9 +7,12 @@ Calamares installer configuration that ships inside the live image. It:
 
 1. Adds ``parental-guard`` to the pacstrap basePackages list so the target
    system receives the guard package during installation.
-2. Adds ``parental-guard.service`` and ``parental-guard-agent.service`` to the
+2. Copies the live image's temporary ``/srv/parental-os-repo`` into the target
+   root before pacstrap, because pacstrap resolves file:// repos below the new
+   root while synchronizing databases.
+3. Adds ``parental-guard.service`` and ``parental-guard-agent.service`` to the
    services-systemd enable list so both services are enabled on the target.
-3. Installs a final target cleanup that removes only the marked temporary
+4. Installs a final target cleanup that removes only the marked temporary
    ``[parental-os]`` repository stanza from the installed target's pacman.conf
    after installation completes.
 
@@ -36,6 +39,7 @@ PARENTAL_GUARD_PKG = "parental-guard"
 PARENTAL_GUARD_SERVICE = "parental-guard.service"
 PARENTAL_GUARD_AGENT_SERVICE = "parental-guard-agent.service"
 CLEANUP_SCRIPT_PATH = "/etc/calamares/scripts/remove-parental-os-repo"
+COPY_REPO_SCRIPT_PATH = "/etc/calamares/scripts/copy-parental-os-repo"
 
 # The temporary repository stanza added to the live image pacman.conf. The
 # target cleanup must remove exactly this stanza and nothing else.
@@ -104,6 +108,31 @@ def add_cleanup_to_postinstall_files(conf_path: Path) -> None:
     print(f"apply-parental-overlay: added {CLEANUP_SCRIPT_PATH} to {conf_path}")
 
 
+def add_repo_copy_to_before_online(conf_path: Path) -> None:
+    """Copy the temporary local repository into the target before pacstrap."""
+    content = load_yaml(conf_path)
+    if "dontChroot: true" not in content:
+        fail(
+            f"expected dontChroot: true in {conf_path}; "
+            "repo copy must run from the live environment before pacstrap"
+        )
+
+    command = f'    - command: "{COPY_REPO_SCRIPT_PATH} ${{ROOT}}"'
+    if COPY_REPO_SCRIPT_PATH in content:
+        return
+
+    marker = "script:\n"
+    if marker not in content:
+        fail(
+            f"could not find script list in {conf_path}; "
+            "upstream layout may have changed"
+        )
+
+    content = content.replace(marker, marker + command + "\n", 1)
+    conf_path.write_text(content, encoding="utf-8")
+    print(f"apply-parental-overlay: wired target repo copy in {conf_path}")
+
+
 def add_services_to_systemd(conf_path: Path) -> None:
     """Add both parental-guard services to the services-systemd units list.
 
@@ -156,6 +185,11 @@ def install_target_cleanup(calamares_src_dir: Path) -> None:
         f'  echo "remove-parental-os-repo: $target_pacman_conf not found" >&2\n'
         f"  exit 1\n"
         f"fi\n"
+        f'target_root=""\n'
+        f'case "$target_pacman_conf" in\n'
+        f'  /etc/pacman.conf) target_root="/" ;;\n'
+        f'  */etc/pacman.conf) target_root="${{target_pacman_conf%/etc/pacman.conf}}" ;;\n'
+        f'esac\n'
         f"# Remove the stanza block: from [{TEMP_REPO_STANZA_MARKER}] to the\n"
         f"# next stanza header or EOF.\n"
         f'python3 - "$target_pacman_conf" <<\'PYEOF\'\n'
@@ -168,11 +202,57 @@ def install_target_cleanup(calamares_src_dir: Path) -> None:
         f"new = re.sub(pattern, '', content)\n"
         f"with open(path, 'w') as f:\n"
         f"    f.write(new)\n"
-        f"PYEOF\n",
+        f"PYEOF\n"
+        f'if [[ -n "$target_root" ]]; then\n'
+        f'  if [[ "$target_root" == "/" ]]; then\n'
+        f'    repo_path="/srv/parental-os-repo"\n'
+        f'  else\n'
+        f'    repo_path="$target_root/srv/parental-os-repo"\n'
+        f'  fi\n'
+        f'  rm -rf -- "$repo_path"\n'
+        f'fi\n',
         encoding="utf-8",
     )
     cleanup_script.chmod(0o755)
     print(f"apply-parental-overlay: installed target cleanup at {cleanup_script}")
+
+
+def install_target_repo_copy(calamares_src_dir: Path) -> None:
+    """Install a pre-pacstrap script that stages the local repo in the target."""
+    scripts_dir = calamares_src_dir / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    copy_script = scripts_dir / "copy-parental-os-repo"
+    copy_script.write_text(
+        "#!/bin/bash\n"
+        "# Copy the live image's temporary repository into the mounted target.\n"
+        "# pacstrap resolves file:// repository URLs relative to the target root.\n"
+        "set -euo pipefail\n"
+        'source_repo="${PARENTAL_OS_REPO_SOURCE:-/srv/parental-os-repo}"\n'
+        'target_root="${1:-${ROOT:-}}"\n'
+        'if [[ -z "$target_root" ]]; then\n'
+        '  echo "copy-parental-os-repo: target root argument is required" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'if [[ ! -d "$target_root" ]]; then\n'
+        '  echo "copy-parental-os-repo: target root not found: $target_root" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'if [[ ! -d "$source_repo" ]]; then\n'
+        '  echo "copy-parental-os-repo: source repo not found: $source_repo" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'if [[ ! -e "$source_repo/parental-os.db" ]]; then\n'
+        '  echo "copy-parental-os-repo: source repo database missing" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'install -d "$target_root/srv"\n'
+        'rm -rf -- "$target_root/srv/parental-os-repo"\n'
+        'cp -a "$source_repo" "$target_root/srv/parental-os-repo"\n',
+        encoding="utf-8",
+    )
+    copy_script.chmod(0o755)
+    print(f"apply-parental-overlay: installed target repo copy at {copy_script}")
 
 
 def wire_shellprocess_cleanup(calamares_src_dir: Path) -> None:
@@ -216,6 +296,9 @@ def install_live_calamares_files(calamares_src_dir: Path, live_airootfs_dir: Pat
         calamares_src_dir / "src/modules/pacstrap/pacstrap.conf": modules_dir
         / "pacstrap.conf",
         calamares_src_dir
+        / "src/modules/shellprocess/shellprocess-before-online.conf": modules_dir
+        / "shellprocess-before-online.conf",
+        calamares_src_dir
         / "src/modules/services-systemd/services-systemd.conf": modules_dir
         / "services-systemd.conf",
         calamares_src_dir
@@ -227,10 +310,11 @@ def install_live_calamares_files(calamares_src_dir: Path, live_airootfs_dir: Pat
             fail(f"expected file not found: {src}")
         dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
 
-    cleanup_src = calamares_src_dir / "scripts/remove-parental-os-repo"
-    cleanup_dest = scripts_dir / "remove-parental-os-repo"
-    cleanup_dest.write_text(cleanup_src.read_text(encoding="utf-8"), encoding="utf-8")
-    cleanup_dest.chmod(0o755)
+    for script_name in ("copy-parental-os-repo", "remove-parental-os-repo"):
+        script_src = calamares_src_dir / "scripts" / script_name
+        script_dest = scripts_dir / script_name
+        script_dest.write_text(script_src.read_text(encoding="utf-8"), encoding="utf-8")
+        script_dest.chmod(0o755)
 
     print(f"apply-parental-overlay: installed live Calamares files under {live_etc}")
 
@@ -315,12 +399,18 @@ def copy_transformer_to_live(live_airootfs_dir: Path, transformer_src: Path) -> 
 
 def transform_source(calamares_src_dir: Path) -> None:
     pacstrap_conf = calamares_src_dir / "src/modules/pacstrap/pacstrap.conf"
+    before_online_conf = (
+        calamares_src_dir
+        / "src/modules/shellprocess/shellprocess-before-online.conf"
+    )
     services_conf = (
         calamares_src_dir / "src/modules/services-systemd/services-systemd.conf"
     )
     add_package_to_pacstrap(pacstrap_conf)
+    add_repo_copy_to_before_online(before_online_conf)
     add_cleanup_to_postinstall_files(pacstrap_conf)
     add_services_to_systemd(services_conf)
+    install_target_repo_copy(calamares_src_dir)
     install_target_cleanup(calamares_src_dir)
     wire_shellprocess_cleanup(calamares_src_dir)
 

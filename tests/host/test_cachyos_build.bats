@@ -93,6 +93,20 @@ teardown() {
   [ "$d_br" = "$h_br" ]
 }
 
+@test "desktop required packages include QEMU smoke bootstrap dependencies" {
+  required="$(cachyos_metadata_value desktop required_packages)"
+  for pkg in cloud-init openssh qemu-guest-agent; do
+    [[ " $required " == *" $pkg "* ]]
+  done
+}
+
+@test "handheld required packages include QEMU smoke bootstrap dependencies" {
+  required="$(cachyos_metadata_value handheld required_packages)"
+  for pkg in cloud-init openssh qemu-guest-agent; do
+    [[ " $required " == *" $pkg "* ]]
+  done
+}
+
 @test "edition metadata must not encode any hardcoded 40-char SHA" {
   # Observed research SHAs are evidence only and must not be build pins.
   for ed in desktop handheld; do
@@ -316,9 +330,12 @@ EOF
   [ ! -e "$live/etc/calamares/scripts/remove-parental-os-repo" ]
   [ -x "$live/usr/local/lib/parental-os/apply-parental-overlay.py" ]
   [ -f "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf" ]
+  [ -f "$live/usr/share/calamares/src/modules/shellprocess/shellprocess-before-online.conf" ]
   grep -qx '  - parental-guard' "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"
   grep -qx '  - base' "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"
   grep -qx '  - cachyos-hooks' "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"
+  grep -q '/etc/calamares/scripts/copy-parental-os-repo ${ROOT}' \
+    "$live/usr/share/calamares/src/modules/shellprocess/shellprocess-before-online.conf"
   grep -q '  - "/etc/calamares/scripts/remove-parental-os-repo"' \
     "$live/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"
   grep -q '/etc/calamares/scripts/remove-parental-os-repo /etc/pacman.conf' \
@@ -347,18 +364,45 @@ EOF
   _run_transformer_runtime "$live/usr/share/calamares" "$live"
   [ "$status" -eq 0 ]
   [ -f "$live/etc/calamares/modules/pacstrap.conf" ]
+  [ -f "$live/etc/calamares/modules/shellprocess-before-online.conf" ]
   [ -f "$live/etc/calamares/modules/services-systemd.conf" ]
   [ -f "$live/etc/calamares/modules/shellprocess_cleanup_calamares.conf" ]
+  [ -x "$live/etc/calamares/scripts/copy-parental-os-repo" ]
   [ -x "$live/etc/calamares/scripts/remove-parental-os-repo" ]
   grep -qx '  - parental-guard' "$live/etc/calamares/modules/pacstrap.conf"
   grep -qx '  - base' "$live/etc/calamares/modules/pacstrap.conf"
   grep -qx '  - cachyos-hooks' "$live/etc/calamares/modules/pacstrap.conf"
+  grep -q '/etc/calamares/scripts/copy-parental-os-repo ${ROOT}' \
+    "$live/etc/calamares/modules/shellprocess-before-online.conf"
   grep -q '  - "/etc/calamares/scripts/remove-parental-os-repo"' \
     "$live/etc/calamares/modules/pacstrap.conf"
   grep -q 'parental-guard.service' "$live/etc/calamares/modules/services-systemd.conf"
   grep -q 'parental-guard-agent.service' "$live/etc/calamares/modules/services-systemd.conf"
   grep -q '/etc/calamares/scripts/remove-parental-os-repo /etc/pacman.conf' \
     "$live/etc/calamares/modules/shellprocess_cleanup_calamares.conf"
+}
+
+@test "copy-parental-os-repo copies the live repo into the pacstrap target root" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  source_repo="$TEST_TMP/source-repo"
+  target="$TEST_TMP/target"
+  _copy_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin" "$source_repo" "$target"
+  printf 'db\n' >"$source_repo/parental-os.db"
+  printf 'pkg\n' >"$source_repo/parental-guard.pkg.tar.zst"
+  cat >"$live/usr/local/bin/calamares-online.sh" <<'EOF'
+#!/usr/bin/env bash
+sudo pacman -Sy --noconfirm cachyos-calamares-next
+exec pkexec-wrapper calamares
+EOF
+
+  _run_transformer_source "$calamares" "$live" cachyos-calamares-next
+  [ "$status" -eq 0 ]
+  PARENTAL_OS_REPO_SOURCE="$source_repo" run "$calamares/scripts/copy-parental-os-repo" "$target"
+  [ "$status" -eq 0 ]
+  [ -f "$target/srv/parental-os-repo/parental-os.db" ]
+  [ -f "$target/srv/parental-os-repo/parental-guard.pkg.tar.zst" ]
 }
 
 @test "source transformation fails closed on Calamares layout drift" {
@@ -433,7 +477,8 @@ EOF
 @test "generated cleanup removes only the marked block from a non-default target" {
   calamares="$TEST_TMP/calamares"
   live="$TEST_TMP/live"
-  target="$TEST_TMP/custom-pacman.conf"
+  target_root="$TEST_TMP/target-root"
+  target="$target_root/etc/pacman.conf"
   _copy_calamares_fixture "$calamares"
   mkdir -p "$live/usr/local/bin"
   cat >"$live/usr/local/bin/calamares-online.sh" <<'EOF'
@@ -445,6 +490,8 @@ EOF
   [ "$status" -eq 0 ]
   _run_transformer_runtime "$live/usr/share/calamares" "$live"
   [ "$status" -eq 0 ]
+  mkdir -p "$target_root/etc" "$target_root/srv/parental-os-repo"
+  printf 'db\n' >"$target_root/srv/parental-os-repo/parental-os.db"
   cat >"$target" <<'EOF'
 [core]
 Server = https://core.invalid/
@@ -463,6 +510,7 @@ EOF
   grep -q '^\[core\]$' "$target"
   grep -q '^\[parental-os-archive\]$' "$target"
   grep -q 'https://archive.invalid/' "$target"
+  [ ! -e "$target_root/srv/parental-os-repo" ]
 }
 
 @test "official staging preserves prepare_profile and invokes buildiso.sh" {
@@ -485,12 +533,40 @@ EOF
   run stage_official_tree desktop "$live" "$calamares" "$repo" "$staged"
   [ "$status" -eq 0 ]
   grep -q 'prepare_profile' "$staged/util-iso.sh"
-  grep -qx 'parental-guard' "$staged/archiso/packages_desktop.x86_64"
+  required="$(cachyos_metadata_value desktop required_packages)"
+  for pkg in $required; do
+    grep -qx "$pkg" "$staged/archiso/packages_desktop.x86_64"
+    [ "$(grep -xc "$pkg" "$staged/archiso/packages_desktop.x86_64")" -eq 1 ]
+  done
   grep -q '^# BEGIN parental-os temporary repository$' "$staged/archiso/pacman.conf"
   grep -q '^# BEGIN parental-os temporary repository$' \
     "$staged/archiso/airootfs/etc/pacman-more.conf"
   grep -q '^# BEGIN parental-os temporary repository$' \
     "$staged/archiso/airootfs/etc/pacman.conf"
+  wants="$staged/archiso/airootfs/etc/systemd/system/multi-user.target.wants"
+  for service in \
+    cloud-init-local.service \
+    cloud-init.service \
+    cloud-config.service \
+    cloud-final.service \
+    sshd.service \
+    qemu-guest-agent.service; do
+    [ -L "$wants/$service" ]
+    [ "$(readlink "$wants/$service")" = "/usr/lib/systemd/system/$service" ]
+  done
+
+  run stage_official_tree desktop "$live" "$calamares" "$repo" "$staged"
+  [ "$status" -eq 0 ]
+  for service in \
+    cloud-init-local.service \
+    cloud-init.service \
+    cloud-config.service \
+    cloud-final.service \
+    sshd.service \
+    qemu-guest-agent.service; do
+    [ -L "$wants/$service" ]
+    [ "$(readlink "$wants/$service")" = "/usr/lib/systemd/system/$service" ]
+  done
 
   export OFFICIAL_INVOCATION_LOG="$invocation"
   export OFFICIAL_USER_LOG="$official_user"
@@ -532,6 +608,14 @@ EOF
   grep -Eq 'sudo[[:space:]]+rm[[:space:]]+-rf[[:space:]]+"\$staged_dir"' "$f"
 }
 
+@test "official staging appends required packages idempotently" {
+  f="$TEST_ROOT/distros/cachyos/container/build-edition.sh"
+  [[ -f "$f" ]]
+  grep -Fq 'required_packages="$(cachyos_metadata_value "$edition" required_packages)"' "$f"
+  grep -Eq 'for[[:space:]]+pkg[[:space:]]+in[[:space:]]+\$required_packages' "$f"
+  grep -Eq 'grep[[:space:]]+-qx[[:space:]]+"\$pkg"[[:space:]]+"\$staged_dir/archiso/\$packages_file"' "$f"
+}
+
 @test "container entrypoint never bypasses official buildiso with direct mkarchiso" {
   f="$TEST_ROOT/distros/cachyos/container/build-edition.sh"
   grep -Eq '(^|[[:space:]])\\./buildiso\\.sh|/buildiso\\.sh' "$f"
@@ -549,6 +633,9 @@ EOF
     'parental-guard 0.1.0-1' \
     'cachyos-calamares-next 3.4.2-6' \
     'linux-cachyos 6.0-1' \
+    'cloud-init 24.4-1' \
+    'openssh 9.9p1-1' \
+    'qemu-guest-agent 9.2.0-1' \
     >"$edition_dir/pkglist.x86_64.txt"
   printf 'log\n' >"$edition_dir/build.log"
   cachyos_provenance_write "$edition_dir/provenance.json" \
@@ -582,6 +669,8 @@ EOF
   printf 'old sum\n' >"$edition_dir/parental-os-cachyos-desktop-2026.08.04-x86_64.iso.sha256"
   printf 'current\n' >"$edition_dir/parental-os-cachyos-desktop.iso"
   printf 'current sum\n' >"$edition_dir/parental-os-cachyos-desktop.iso.sha256"
+  mkdir -p "$edition_dir/stale-directory.iso"
+  printf 'stale nested\n' >"$edition_dir/stale-directory.iso/payload"
   printf 'pkglist\n' >"$edition_dir/pkglist.x86_64.txt"
   printf 'log\n' >"$edition_dir/build.log"
   printf '{"edition":"desktop"}\n' >"$edition_dir/provenance.json"
@@ -595,6 +684,7 @@ EOF
   [ ! -e "$edition_dir/parental-os-cachyos-desktop-2026.08.04-x86_64.iso.sha256" ]
   [ ! -e "$edition_dir/parental-os-cachyos-desktop.iso" ]
   [ ! -e "$edition_dir/parental-os-cachyos-desktop.iso.sha256" ]
+  [ ! -e "$edition_dir/stale-directory.iso" ]
   [ ! -e "$edition_dir/pkglist.x86_64.txt" ]
   [ ! -e "$edition_dir/build.log" ]
   [ -f "$edition_dir/provenance.json" ]
