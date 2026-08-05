@@ -14,12 +14,18 @@ if ! getent group parental-users >/dev/null 2>&1; then
     groupadd --system parental-users || groupadd parental-users
 fi
 
-if ! id child >/dev/null 2>&1; then
-    useradd -m -s /bin/bash child
-    passwd --lock child >/dev/null 2>&1 || true
-fi
+mkdir -p /lib/live/config
+cat >/lib/live/config/9999-parental-os-user <<'EOF'
+#!/bin/sh
+set -e
 
-/usr/lib/parental-os/user-setup.sh child
+user="${LIVE_USERNAME:-child}"
+if getent passwd "$user" >/dev/null 2>&1; then
+    /usr/lib/parental-os/user-setup.sh "$user"
+fi
+EOF
+chmod 755 /lib/live/config/9999-parental-os-user
+
 systemctl enable parental-guard.service parental-guard-agent.service >/dev/null 2>&1 || true
 
 rm -rf "$DEB_DIR"

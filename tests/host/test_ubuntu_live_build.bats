@@ -75,6 +75,15 @@ function ubuntu_chroot_hook_installs_local_deb_and_seeds_parental_controls { # @
   grep -q 'child' "$f"
 }
 
+function ubuntu_chroot_hook_defers_live_user_setup_until_live_config_creates_user { # @test
+  f="$TEST_ROOT/distros/ubuntu/config/hooks/normal/9000-parental-os.hook.chroot"
+  ! grep -Eq '(^|[[:space:]])useradd([[:space:]]|$)' "$f"
+  ! grep -Eq 'passwd[[:space:]]+--lock' "$f"
+  grep -q '/lib/live/config/9999-parental-os-user' "$f"
+  grep -q 'LIVE_USERNAME:-child' "$f"
+  grep -q '/usr/lib/parental-os/user-setup.sh "\$user"' "$f"
+}
+
 function build_ubuntu_sh_builds_deb_first_and_uses_common_out_helpers { # @test
   f="$TEST_ROOT/scripts/build-ubuntu.sh"
   [[ -f "$f" ]]

@@ -29,6 +29,13 @@ RUN apt-get update \
   && sed -i 's|tar xfz /usr/share/gfxboot-theme-ubuntu/bootlogo.tar.gz -C ${_TARGET}|if [ "${LB_SYSLINUX_THEME}" != "live-build" ]; then tar xfz /usr/share/gfxboot-theme-ubuntu/bootlogo.tar.gz -C ${_TARGET}; fi|' /usr/lib/live/build/lb_binary_syslinux \
   && sed -i 's|^tmpdir="$(mktemp -d)"$|if [ "${LB_SYSLINUX_THEME}" != "live-build" ]\nthen\n\ttmpdir="$(mktemp -d)"|; s|^rm -rf "$tmpdir"$|rm -rf "$tmpdir"\nfi|' /usr/lib/live/build/lb_binary_syslinux \
   && sed -i 's|Check_package chroot/usr/bin/isohybrid syslinux|Check_package chroot/usr/bin/isohybrid syslinux-utils|' /usr/lib/live/build/lb_binary_iso \
+  && test "$(readlink /usr/share/live/build/bootloaders/isolinux/isolinux.bin)" = "/usr/lib/ISOLINUX/isolinux.bin" \
+  && test "$(readlink /usr/share/live/build/bootloaders/isolinux/vesamenu.c32)" = "/usr/lib/syslinux/modules/bios/vesamenu.c32" \
+  && grep -q 'chroot/usr/lib/ISOLINUX/isolinux.bin isolinux' /usr/lib/live/build/lb_binary_syslinux \
+  && grep -q 'chroot/usr/bin/rsvg-convert librsvg2-bin' /usr/lib/live/build/lb_binary_syslinux \
+  && grep -q 'rsvg-convert --format png --height 480 --width 640 --output splash.png splash.svg' /usr/lib/live/build/lb_binary_syslinux \
+  && grep -q 'if \[ "${LB_SYSLINUX_THEME}" != "live-build" \]' /usr/lib/live/build/lb_binary_syslinux \
+  && grep -q 'chroot/usr/bin/isohybrid syslinux-utils' /usr/lib/live/build/lb_binary_iso \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
