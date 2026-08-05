@@ -1039,6 +1039,39 @@ EOF
   [ -f "$pkgdir/usr/local/bin/staged-only" ]
 }
 
+@test "Arch install script removes temporary parental-os pacman repo" {
+  target_root="$TEST_TMP/target-root"
+  mkdir -p "$target_root/etc"
+  cat >"$target_root/etc/pacman.conf" <<'EOF'
+[core]
+Server = https://core.invalid/
+
+# BEGIN parental-os temporary repository
+[parental-os]
+SigLevel = Optional TrustAll
+Server = http://127.0.0.1:8765
+# END parental-os temporary repository
+
+[extra]
+Server = https://extra.invalid/
+EOF
+
+  (
+    groupadd() { return 0; }
+    systemctl() { return 0; }
+    export -f groupadd systemctl
+    export PARENTAL_OS_PACMAN_ROOT="$target_root"
+    # shellcheck source=/dev/null
+    source "$TEST_ROOT/packages/parental-guard/arch/parental-guard.install"
+    post_install
+  )
+
+  [ "$(grep -c '^\[parental-os\]$' "$target_root/etc/pacman.conf")" -eq 0 ]
+  [ "$(grep -c '127.0.0.1:8765' "$target_root/etc/pacman.conf")" -eq 0 ]
+  grep -q '^\[core\]$' "$target_root/etc/pacman.conf"
+  grep -q '^\[extra\]$' "$target_root/etc/pacman.conf"
+}
+
 @test "all generated paths in build-cachyos.sh are under out/" {
   f="$PARENTAL_OS_ROOT/scripts/build-cachyos.sh"
   [[ -f "$f" ]]

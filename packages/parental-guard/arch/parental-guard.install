@@ -1,4 +1,32 @@
+remove_temp_parental_repo() {
+  local root="${PARENTAL_OS_PACMAN_ROOT:-}"
+  local pacman_conf="${root}/etc/pacman.conf"
+  local pacman_more_conf="${root}/etc/pacman-more.conf"
+
+  python3 - "$pacman_conf" "$pacman_more_conf" <<'PYEOF'
+import re
+import sys
+
+marked = r"^# BEGIN parental-os temporary repository\n\[parental-os\]\n.*?^# END parental-os temporary repository\n?"
+unmarked = r"^\[parental-os\]\n.*?(?=^\[[^]\n]+\]\n|\Z)"
+
+for path in sys.argv[1:]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        continue
+
+    new = re.sub(marked, "", content, flags=re.MULTILINE | re.DOTALL)
+    new = re.sub(unmarked, "", new, flags=re.MULTILINE | re.DOTALL)
+    if new != content:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new)
+PYEOF
+}
+
 post_install() {
+  remove_temp_parental_repo
   groupadd --system parental-users 2>/dev/null || groupadd parental-users 2>/dev/null || true
   systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl enable parental-guard.service parental-guard-agent.service >/dev/null 2>&1 || true
