@@ -539,11 +539,24 @@ EOF
     [ "$(grep -xc "$pkg" "$staged/archiso/packages_desktop.x86_64")" -eq 1 ]
   done
   grep -q '^# BEGIN parental-os temporary repository$' "$staged/archiso/pacman.conf"
+  grep -q '^Server = file:///srv/parental-os-repo$' "$staged/archiso/pacman.conf"
   grep -q '^# BEGIN parental-os temporary repository$' \
+    "$staged/archiso/airootfs/etc/pacman-more.conf"
+  grep -q '^Server = http://127.0.0.1:8765$' \
     "$staged/archiso/airootfs/etc/pacman-more.conf"
   grep -q '^# BEGIN parental-os temporary repository$' \
     "$staged/archiso/airootfs/etc/pacman.conf"
+  grep -q '^Server = http://127.0.0.1:8765$' \
+    "$staged/archiso/airootfs/etc/pacman.conf"
+  [ ! -e "$staged/archiso/airootfs/etc/calamares/modules/pacstrap.conf" ]
+  [ ! -e "$staged/archiso/airootfs/etc/calamares/modules/shellprocess-before-online.conf" ]
+  repo_service="$staged/archiso/airootfs/etc/systemd/system/parental-os-repo.service"
+  [ -f "$repo_service" ]
+  grep -q 'python -m http.server 8765 --bind 127.0.0.1 --directory /srv/parental-os-repo' \
+    "$repo_service"
   wants="$staged/archiso/airootfs/etc/systemd/system/multi-user.target.wants"
+  [ -L "$wants/parental-os-repo.service" ]
+  [ "$(readlink "$wants/parental-os-repo.service")" = "/etc/systemd/system/parental-os-repo.service" ]
   for service in \
     cloud-init-local.service \
     cloud-init.service \
@@ -688,6 +701,12 @@ EOF
   [ ! -e "$edition_dir/pkglist.x86_64.txt" ]
   [ ! -e "$edition_dir/build.log" ]
   [ -f "$edition_dir/provenance.json" ]
+}
+
+@test "edition artifact cleanup handles root-owned stale generated directories with sudo fallback" {
+  f="$TEST_ROOT/distros/cachyos/container/build-edition.sh"
+  [[ -f "$f" ]]
+  grep -Eq 'sudo[[:space:]]+rm[[:space:]]+-rf[[:space:]]+"\$\{generated_artifacts\[@\]\}"' "$f"
 }
 
 @test "artifact validation rejects invalid provenance and edition drift" {

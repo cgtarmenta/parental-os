@@ -99,8 +99,12 @@ create_local_repo() {
 
 append_parental_repo_stanza() {
   local file="$1"
+  local server="${2:-file:///srv/parental-os-repo}"
   [[ -f "$file" ]] || die "pacman config not found: $file"
   if grep -q '^# BEGIN parental-os temporary repository$' "$file"; then
+    sed -i \
+      "/^# BEGIN parental-os temporary repository$/,/^# END parental-os temporary repository$/ s|^Server = .*|Server = $server|" \
+      "$file"
     return 0
   fi
   cat >>"$file" <<'EOF'
@@ -108,9 +112,32 @@ append_parental_repo_stanza() {
 # BEGIN parental-os temporary repository
 [parental-os]
 SigLevel = Optional TrustAll
-Server = file:///srv/parental-os-repo
+Server = PLACEHOLDER_PARENTAL_OS_REPO_SERVER
 # END parental-os temporary repository
 EOF
+  sed -i "s|PLACEHOLDER_PARENTAL_OS_REPO_SERVER|$server|" "$file"
+}
+
+install_live_repo_service() {
+  local live_root="$1"
+  local service_dir="$live_root/etc/systemd/system"
+  local wants_dir="$service_dir/multi-user.target.wants"
+  mkdir -p "$service_dir" "$wants_dir"
+  cat >"$service_dir/parental-os-repo.service" <<'EOF'
+[Unit]
+Description=Temporary parental-os package repository
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python -m http.server 8765 --bind 127.0.0.1 --directory /srv/parental-os-repo
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  ln -sfn "/etc/systemd/system/parental-os-repo.service" \
+    "$wants_dir/parental-os-repo.service"
 }
 
 stage_official_tree() {
@@ -151,16 +178,19 @@ stage_official_tree() {
   done
 
   append_parental_repo_stanza "$staged_dir/archiso/pacman.conf"
-  append_parental_repo_stanza "$staged_dir/archiso/airootfs/etc/pacman-more.conf"
+  append_parental_repo_stanza \
+    "$staged_dir/archiso/airootfs/etc/pacman-more.conf" \
+    "http://127.0.0.1:8765"
   local live_pacman_conf="$staged_dir/archiso/airootfs/etc/pacman.conf"
   if [[ ! -f "$live_pacman_conf" ]]; then
     mkdir -p "${live_pacman_conf%/*}"
     cp "$staged_dir/archiso/pacman.conf" "$live_pacman_conf"
   fi
-  append_parental_repo_stanza "$live_pacman_conf"
+  append_parental_repo_stanza "$live_pacman_conf" "http://127.0.0.1:8765"
 
   mkdir -p "$staged_dir/archiso/airootfs/srv/parental-os-repo"
   cp -a "$repo_dir/." "$staged_dir/archiso/airootfs/srv/parental-os-repo/"
+  install_live_repo_service "$staged_dir/archiso/airootfs"
 
   python3 "$REPO_DIR/distros/cachyos/calamares/apply-parental-overlay.py" \
     stage \
@@ -183,12 +213,17 @@ run_official_build() {
 
 clean_edition_artifacts() {
   local edition_out="$1"
+  local generated_artifacts
   mkdir -p "$edition_out"
-  rm -rf \
+  generated_artifacts=(
     "$edition_out"/*.iso \
     "$edition_out"/*.iso.sha256 \
     "$edition_out"/pkglist.x86_64.txt \
     "$edition_out"/build.log
+  )
+  if ! rm -rf "${generated_artifacts[@]}" 2>/dev/null; then
+    sudo rm -rf "${generated_artifacts[@]}"
+  fi
 }
 
 # ---------------------------------------------------------------------------
