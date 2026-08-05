@@ -27,8 +27,29 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
-ensure_out_dirs() {
+docker_context_name() {
+  printf '%s\n' "${DOCKER_CONTEXT:-default}"
+}
+
+docker_cli() {
+  docker --context "$(docker_context_name)" "$@"
+}
+
+# Return the output directory root. Inside the privileged CachyOS builder
+# container, PARENTAL_OS_OUT is set to /out (the writable bind mount). On the
+# host, it defaults to <repo_root>/out.
+out_root() {
+  if [[ -n "${PARENTAL_OS_OUT:-}" ]]; then
+    printf '%s\n' "$PARENTAL_OS_OUT"
+    return 0
+  fi
   local root
   root="$(repo_root)"
-  mkdir -p "$root/out/ubuntu" "$root/out/cachyos" "$root/out/packages" "$root/out/logs" "$root/out/qemu"
+  printf '%s/out\n' "$root"
+}
+
+ensure_out_dirs() {
+  local out
+  out="$(out_root)"
+  mkdir -p "$out/ubuntu" "$out/cachyos" "$out/packages" "$out/logs" "$out/qemu"
 }

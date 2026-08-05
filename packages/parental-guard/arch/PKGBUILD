@@ -11,9 +11,14 @@ source=()
 install=parental-guard.install
 
 package() {
-  local root="$startdir/../src"
+  local root="$startdir/src"
   if [[ ! -d "$root/etc" ]]; then
-    root="$startdir/../../overlays"
+    # Fall back to overlays from the parental-os checkout (host or container).
+    if [[ -n "${PARENTAL_OS_ROOT:-}" && -d "$PARENTAL_OS_ROOT/overlays/etc" ]]; then
+      root="$PARENTAL_OS_ROOT/overlays"
+    else
+      root="$startdir/../../overlays"
+    fi
   fi
   cp -a "$root"/* "$pkgdir"/
   chmod 440 "$pkgdir/etc/sudoers.d/parental-os"

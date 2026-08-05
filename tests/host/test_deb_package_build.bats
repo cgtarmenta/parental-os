@@ -14,6 +14,7 @@
 setup_file() {
   TEST_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   export PARENTAL_OS_ROOT="$TEST_ROOT"
+  export DOCKER_CONTEXT="${DOCKER_CONTEXT:-default}"
   export DEB="$TEST_ROOT/out/packages/parental-guard_0.1.0-1_all.deb"
   export STAGE_PARENT="$TEST_ROOT/out/deb-src"
   if ! command -v docker >/dev/null 2>&1; then
@@ -24,20 +25,30 @@ setup_file() {
   export DEB_BUILD_STATUS="$status"
 }
 
-skip_if_no_docker() {
-  command -v docker >/dev/null 2>&1 || skip "docker not available"
+setup() {
+  # shellcheck source=/dev/null
+  source "$PARENTAL_OS_ROOT/scripts/lib/common.sh"
 }
 
-@test "docker build produces exact artifact parental-guard_0.1.0-1_all.deb" {
+skip_if_no_docker() {
+  command -v docker >/dev/null 2>&1 || skip "docker not available"
+  docker_cli info >/dev/null 2>&1 \
+    || skip "docker context $DOCKER_CONTEXT is unavailable"
+}
+
+bats_test_function --description "docker build produces exact artifact parental-guard_0.1.0-1_all.deb" -- deb_build_produces_exact_artifact
+deb_build_produces_exact_artifact() {
   skip_if_no_docker
   [ "${DEB_BUILD_STATUS:-1}" -eq 0 ]
   [ -f "$DEB" ]
 }
 
-@test "built .deb contains /etc and /usr payload with no /usr/etc" {
+bats_test_function --description "built .deb contains /etc and /usr payload with no /usr/etc" -- deb_contains_expected_payload
+deb_contains_expected_payload() {
   skip_if_no_docker
   [ -f "$DEB" ]
-  run docker run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm dpkg-deb --contents /pkg.deb
+  run docker_cli run --rm \
+    -v "$DEB:/pkg.deb:ro" debian:bookworm dpkg-deb --contents /pkg.deb
   [ "$status" -eq 0 ]
   [[ "$output" == *"/etc/sudoers.d/parental-os"* ]]
   [[ "$output" == *"/etc/parental-os/config.env"* ]]
@@ -56,20 +67,23 @@ skip_if_no_docker() {
   [[ "$output" != *"/usr/etc/"* ]]
 }
 
-@test "built .deb ships sudoers drop-in at mode 0440" {
+bats_test_function --description "built .deb ships sudoers drop-in at mode 0440" -- deb_sudoers_mode_0440
+deb_sudoers_mode_0440() {
   skip_if_no_docker
   [ -f "$DEB" ]
-  run docker run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm dpkg-deb --contents /pkg.deb
+  run docker_cli run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm dpkg-deb --contents /pkg.deb
   [ "$status" -eq 0 ]
   # 0440 -> -r--r----- in dpkg-deb's ls-style listing.
   echo "$output" | grep -Eq '^[-rwxst]{10}[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+.*sudoers\.d/parental-os$' || \
     echo "$output" | grep -E 'sudoers\.d/parental-os$' | grep -Eq '^-r--r-----'
 }
 
-@test "lintian reports no error-level (E:) findings on the built .deb" {
+bats_test_function --description "lintian reports no error-level (E:) findings on the built .deb" -- deb_lintian_no_errors
+deb_lintian_no_errors() {
   skip_if_no_docker
   [ -f "$DEB" ]
-  run docker run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm bash -lc '
+  run docker_cli run --rm \
+    -v "$DEB:/pkg.deb:ro" debian:bookworm bash -lc '
     set -e
     apt-get update -qq >/dev/null 2>&1
     apt-get install -y -qq --no-install-recommends lintian >/dev/null 2>&1
@@ -83,10 +97,12 @@ skip_if_no_docker() {
   ! echo "$output" | grep -Eq '^E: '
 }
 
-@test "dpkg-source produced a valid 3.0 (quilt) source package (.dsc)" {
+bats_test_function --description "dpkg-source produced a valid 3.0 (quilt) source package (.dsc)" -- deb_source_is_quilt
+deb_source_is_quilt() {
   skip_if_no_docker
   [ -d "$STAGE_PARENT" ]
-  run docker run --rm -v "$STAGE_PARENT:/build:ro" debian:bookworm bash -lc '
+  run docker_cli run --rm \
+    -v "$STAGE_PARENT:/build:ro" debian:bookworm bash -lc '
     set -e
     apt-get update -qq >/dev/null 2>&1
     apt-get install -y -qq --no-install-recommends dpkg-dev >/dev/null 2>&1
@@ -99,10 +115,11 @@ skip_if_no_docker() {
   [ "$status" -eq 0 ]
 }
 
-@test "offline/systemd-less install enables both services and creates parental-users group" {
+bats_test_function --description "offline/systemd-less install enables both services and creates parental-users group" -- deb_offline_install_enables_services
+deb_offline_install_enables_services() {
   skip_if_no_docker
   [ -f "$DEB" ]
-  run docker run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm bash -lc '
+  run docker_cli run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm bash -lc '
     set -e
     # A container has no running systemd: /run/systemd/system must not exist.
     test ! -e /run/systemd/system
@@ -118,10 +135,11 @@ skip_if_no_docker() {
   [ "$status" -eq 0 ]
 }
 
-@test "offline install is idempotent (re-run maintscript keeps group and enablement)" {
+bats_test_function --description "offline install is idempotent (re-run maintscript keeps group and enablement)" -- deb_offline_install_idempotent
+deb_offline_install_idempotent() {
   skip_if_no_docker
   [ -f "$DEB" ]
-  run docker run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm bash -lc '
+  run docker_cli run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm bash -lc '
     set -e
     test ! -e /run/systemd/system
     command -v groupadd >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq --no-install-recommends passwd >/dev/null 2>&1

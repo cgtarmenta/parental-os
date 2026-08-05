@@ -9,9 +9,9 @@ target="${1:-all}"
 case "$target" in
   all)
     "$ROOT/scripts/build-ubuntu.sh"
-    "$ROOT/scripts/build-cachyos.sh"
+    "$ROOT/scripts/build-cachyos.sh" all
     ;;
   ubuntu) "$ROOT/scripts/build-ubuntu.sh" ;;
-  cachyos) "$ROOT/scripts/build-cachyos.sh" ;;
+  cachyos) "$ROOT/scripts/build-cachyos.sh" all ;;
   *) die "unknown target: $target (use all|ubuntu|cachyos)" ;;
 esac

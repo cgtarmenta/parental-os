@@ -14,8 +14,8 @@ build target="all":
 build-ubuntu:
   "{{root}}/scripts/build-ubuntu.sh"
 
-build-cachyos:
-  "{{root}}/scripts/build-cachyos.sh"
+build-cachyos edition="all":
+  "{{root}}/scripts/build-cachyos.sh" "{{edition}}"
 
 package-arch:
   "{{root}}/scripts/build-parental-guard-arch.sh"

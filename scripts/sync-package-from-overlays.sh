@@ -1,12 +1,28 @@
 #!/usr/bin/env bash
+# Sync the shared overlays/ tree into an explicit destination directory.
+#
+# Usage: sync-package-from-overlays.sh [destination]
+#
+# When a destination is provided, overlays are synced there. When no
+# destination is given, the default is out/cachyos/staging/parental-guard/src
+# so that generated package sources stay under the gitignored out/ tree and
+# the checkout remains read-only during builds.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=/dev/null
 source "$ROOT/scripts/lib/common.sh"
 export PARENTAL_OS_ROOT="$ROOT"
 require_cmd rsync
-dest="$ROOT/packages/parental-guard/src"
+OUT="$(out_root)"
+dest="${1:-$OUT/cachyos/staging/parental-guard/src}"
+staging_root="$(readlink -m "$OUT/cachyos/staging")"
+dest="$(readlink -m "$dest")"
+mkdir -p "$staging_root"
+case "$dest" in
+  "$staging_root"/*) ;;
+  *) die "destination must be under $staging_root: $dest" ;;
+esac
 rm -rf "$dest"
 mkdir -p "$dest"
 rsync -a "$ROOT/overlays/" "$dest/"
-log "synced overlays -> packages/parental-guard/src"
+log "synced overlays -> $dest"
