@@ -203,7 +203,7 @@ def install_target_cleanup(calamares_src_dir: Path) -> None:
         f'python3 - "${{cleanup_targets[@]}}" <<\'PYEOF\'\n'
         f'import re, sys\n'
         f"marked = r'^# BEGIN parental-os temporary repository\\n\\[parental-os\\]\\n.*?^# END parental-os temporary repository\\n?'\n"
-        f"unmarked = r'^\\[parental-os\\]\\n.*?(?=^\\[[^]\\n]+\\]\\n|\\Z)'\n"
+        f"unmarked_temp = r'^\\[parental-os\\]\\n(?:(?!^\\[[^]\\n]+\\]\\n)[\\s\\S])*(?:Server = http://127\\.0\\.0\\.1:8765|Server = file:///srv/parental-os-repo)(?:(?!^\\[[^]\\n]+\\]\\n)[\\s\\S])*'\n"
         f"for path in sys.argv[1:]:\n"
         f"    try:\n"
         f"        with open(path) as f:\n"
@@ -211,7 +211,7 @@ def install_target_cleanup(calamares_src_dir: Path) -> None:
         f"    except FileNotFoundError:\n"
         f"        continue\n"
         f"    new = re.sub(marked, '', content, flags=re.MULTILINE | re.DOTALL)\n"
-        f"    new = re.sub(unmarked, '', new, flags=re.MULTILINE | re.DOTALL)\n"
+        f"    new = re.sub(unmarked_temp, '', new, flags=re.MULTILINE | re.DOTALL)\n"
         f"    with open(path, 'w') as f:\n"
         f"        f.write(new)\n"
         f"PYEOF\n"

@@ -2,13 +2,14 @@ remove_temp_parental_repo() {
   local root="${PARENTAL_OS_PACMAN_ROOT:-}"
   local pacman_conf="${root}/etc/pacman.conf"
   local pacman_more_conf="${root}/etc/pacman-more.conf"
+  local repo_dir="${root}/srv/parental-os-repo"
 
   python3 - "$pacman_conf" "$pacman_more_conf" <<'PYEOF'
 import re
 import sys
 
 marked = r"^# BEGIN parental-os temporary repository\n\[parental-os\]\n.*?^# END parental-os temporary repository\n?"
-unmarked = r"^\[parental-os\]\n.*?(?=^\[[^]\n]+\]\n|\Z)"
+unmarked_temp = r"^\[parental-os\]\n(?:(?!^\[[^]\n]+\]\n)[\s\S])*(?:Server = http://127\.0\.0\.1:8765|Server = file:///srv/parental-os-repo)(?:(?!^\[[^]\n]+\]\n)[\s\S])*"
 
 for path in sys.argv[1:]:
     try:
@@ -18,11 +19,13 @@ for path in sys.argv[1:]:
         continue
 
     new = re.sub(marked, "", content, flags=re.MULTILINE | re.DOTALL)
-    new = re.sub(unmarked, "", new, flags=re.MULTILINE | re.DOTALL)
+    new = re.sub(unmarked_temp, "", new, flags=re.MULTILINE | re.DOTALL)
     if new != content:
         with open(path, "w", encoding="utf-8") as f:
             f.write(new)
 PYEOF
+
+  rm -rf -- "$repo_dir"
 }
 
 post_install() {

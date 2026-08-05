@@ -563,6 +563,34 @@ EOF
   [ ! -e "$target_root/srv/parental-os-repo" ]
 }
 
+@test "generated cleanup preserves persistent parental-os repo" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  target_root="$TEST_TMP/target-root"
+  target="$target_root/etc/pacman.conf"
+  _copy_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin" "$target_root/etc"
+  cat >"$live/usr/local/bin/calamares-online.sh" <<'EOF'
+#!/usr/bin/env bash
+sudo pacman -Sy --noconfirm cachyos-calamares-next
+exec pkexec-wrapper calamares
+EOF
+  _run_transformer_source "$calamares" "$live" cachyos-calamares-next
+  [ "$status" -eq 0 ]
+  _run_transformer_runtime "$live/usr/share/calamares" "$live"
+  [ "$status" -eq 0 ]
+  cat >"$target" <<'EOF'
+[parental-os]
+SigLevel = Optional TrustAll
+Server = https://packages.example.invalid/parental-os
+EOF
+
+  run "$live/etc/calamares/scripts/remove-parental-os-repo" "$target"
+  [ "$status" -eq 0 ]
+  grep -q '^\[parental-os\]$' "$target"
+  grep -q 'https://packages.example.invalid/parental-os' "$target"
+}
+
 @test "official staging preserves prepare_profile and invokes buildiso.sh" {
   live="$TEST_TMP/live"
   calamares="$TEST_TMP/calamares"
@@ -1041,7 +1069,8 @@ EOF
 
 @test "Arch install script removes temporary parental-os pacman repo" {
   target_root="$TEST_TMP/target-root"
-  mkdir -p "$target_root/etc"
+  mkdir -p "$target_root/etc" "$target_root/srv/parental-os-repo"
+  printf 'db\n' >"$target_root/srv/parental-os-repo/parental-os.db"
   cat >"$target_root/etc/pacman.conf" <<'EOF'
 [core]
 Server = https://core.invalid/
@@ -1070,6 +1099,30 @@ EOF
   [ "$(grep -c '127.0.0.1:8765' "$target_root/etc/pacman.conf")" -eq 0 ]
   grep -q '^\[core\]$' "$target_root/etc/pacman.conf"
   grep -q '^\[extra\]$' "$target_root/etc/pacman.conf"
+  [ ! -e "$target_root/srv/parental-os-repo" ]
+}
+
+@test "Arch install script preserves persistent parental-os pacman repo" {
+  target_root="$TEST_TMP/target-root"
+  mkdir -p "$target_root/etc"
+  cat >"$target_root/etc/pacman.conf" <<'EOF'
+[parental-os]
+SigLevel = Optional TrustAll
+Server = https://packages.example.invalid/parental-os
+EOF
+
+  (
+    groupadd() { return 0; }
+    systemctl() { return 0; }
+    export -f groupadd systemctl
+    export PARENTAL_OS_PACMAN_ROOT="$target_root"
+    # shellcheck source=/dev/null
+    source "$TEST_ROOT/packages/parental-guard/arch/parental-guard.install"
+    post_install
+  )
+
+  grep -q '^\[parental-os\]$' "$target_root/etc/pacman.conf"
+  grep -q 'https://packages.example.invalid/parental-os' "$target_root/etc/pacman.conf"
 }
 
 @test "all generated paths in build-cachyos.sh are under out/" {
