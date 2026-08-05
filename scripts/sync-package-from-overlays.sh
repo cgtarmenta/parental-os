@@ -15,6 +15,13 @@ export PARENTAL_OS_ROOT="$ROOT"
 require_cmd rsync
 OUT="$(out_root)"
 dest="${1:-$OUT/cachyos/staging/parental-guard/src}"
+staging_root="$(readlink -m "$OUT/cachyos/staging")"
+dest="$(readlink -m "$dest")"
+mkdir -p "$staging_root"
+case "$dest" in
+  "$staging_root"/*) ;;
+  *) die "destination must be under $staging_root: $dest" ;;
+esac
 rm -rf "$dest"
 mkdir -p "$dest"
 rsync -a "$ROOT/overlays/" "$dest/"

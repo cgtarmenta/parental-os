@@ -833,10 +833,10 @@ EOF
   chmod +x "$fake_bin/makepkg"
   export FAKE_MAKEPKG_LOG="$TEST_TMP/makepkg.log"
 
-  stage_src="$TEST_TMP/nonexistent-parent/src"
+  stage_src="$PARENTAL_OS_OUT/cachyos/staging/nonexistent-parent/src"
   PATH="$fake_bin:$PATH" run "$PARENTAL_OS_ROOT/scripts/build-parental-guard-arch.sh" "$stage_src"
   [ "$status" -eq 0 ]
-  [ -d "$TEST_TMP/nonexistent-parent" ]
+  [ -d "$PARENTAL_OS_OUT/cachyos/staging/nonexistent-parent" ]
   [ -f "$FAKE_MAKEPKG_LOG" ]
   [ -f "$PARENTAL_OS_OUT/packages/parental-guard-0.1.0-1-any.pkg.tar.zst" ]
 }
@@ -847,6 +847,37 @@ EOF
   # Must accept a destination argument rather than hardcoding packages/.../src.
   grep -Eq 'dest="\$\{1:-' "$f"
   ! grep -Eq '^dest="\$ROOT/packages/parental-guard/src"$' "$f"
+}
+
+@test "sync-package-from-overlays.sh rejects destinations outside CachyOS staging" {
+  unsafe="$TEST_TMP/outside-staging/src"
+  mkdir -p "$unsafe"
+  printf 'keep\n' >"$unsafe/sentinel"
+
+  run "$PARENTAL_OS_ROOT/scripts/sync-package-from-overlays.sh" "$unsafe"
+
+  [ "$status" -ne 0 ]
+  [ -f "$unsafe/sentinel" ]
+}
+
+@test "PKGBUILD packages staged src next to PKGBUILD before checkout overlays fallback" {
+  pkg_stage="$TEST_TMP/pkg-stage"
+  pkgdir="$TEST_TMP/pkgdir"
+  mkdir -p "$pkg_stage/src/etc/sudoers.d" "$pkg_stage/src/usr/local/bin" "$pkgdir"
+  printf 'staged marker\n' >"$pkg_stage/src/usr/local/bin/staged-only"
+  printf 'root ALL=(ALL) NOPASSWD: ALL\n' >"$pkg_stage/src/etc/sudoers.d/parental-os"
+
+  run bash -lc '
+    set -euo pipefail
+    startdir="$1"
+    pkgdir="$2"
+    PARENTAL_OS_ROOT="$3"
+    source "$3/packages/parental-guard/arch/PKGBUILD"
+    package
+  ' _ "$pkg_stage" "$pkgdir" "$PARENTAL_OS_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ -f "$pkgdir/usr/local/bin/staged-only" ]
 }
 
 @test "all generated paths in build-cachyos.sh are under out/" {

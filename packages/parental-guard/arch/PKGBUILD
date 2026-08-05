@@ -11,7 +11,7 @@ source=()
 install=parental-guard.install
 
 package() {
-  local root="$startdir/../src"
+  local root="$startdir/src"
   if [[ ! -d "$root/etc" ]]; then
     # Fall back to overlays from the parental-os checkout (host or container).
     if [[ -n "${PARENTAL_OS_ROOT:-}" && -d "$PARENTAL_OS_ROOT/overlays/etc" ]]; then
