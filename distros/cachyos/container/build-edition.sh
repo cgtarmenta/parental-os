@@ -212,17 +212,39 @@ stage_official_tree() {
   # /usr/share/calamares/src/modules/ (which survived pacstrap because it
   # is not shipped by cachyos-calamares-next) into /etc/calamares/modules/.
   local util_iso="$staged_dir/util-iso.sh"
-  local marker='rm -f "${pacstrap_dir}\/usr\/lib\/systemd\/system\/timers.target.wants\/archlinux-keyring-wkd-sync.timer"'
-  local parental_hook='cp -r "${pacstrap_dir}\/usr\/share\/calamares\/src\/modules\/pacstrap\/pacstrap.conf" "${pacstrap_dir}\/etc\/calamares\/modules\/pacstrap.conf" 2>\/dev\/null || true\n'
-  parental_hook+='\tcp -r "${pacstrap_dir}\/usr\/share\/calamares\/src\/modules\/shellprocess\/shellprocess-before-online.conf" "${pacstrap_dir}\/etc\/calamares\/modules\/shellprocess-before-online.conf" 2>\/dev\/null || true\n'
-  parental_hook+='\tcp -r "${pacstrap_dir}\/usr\/share\/calamares\/src\/modules\/services-systemd\/services-systemd.conf" "${pacstrap_dir}\/etc\/calamares\/modules\/services-systemd.conf" 2>\/dev\/null || true\n'
-  parental_hook+='\tcp -r "${pacstrap_dir}\/usr\/share\/calamares\/src\/modules\/shellprocess\/shellprocess_cleanup_calamares.conf" "${pacstrap_dir}\/etc\/calamares\/modules\/shellprocess_cleanup_calamares.conf" 2>\/dev\/null || true'
   if [[ -f "$util_iso" ]]; then
     if ! grep -q 'parental-os: copy Calamares module files' "$util_iso" 2>/dev/null; then
-      sudo sed -i \
-        "s|${marker}|${marker}\n\t# parental-os: copy Calamares module files into airootfs after pacstrap\n\t${parental_hook}|" \
-        "$util_iso"
-      log "Patched $util_iso with parental-os Calamares module copy hook"
+      python3 - "$util_iso" <<'PYEOF'
+import sys, re
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+# Find the line in modify_mkarchiso that removes the keyring timer.
+# We insert our copy commands right after it.
+pattern = (
+    r'(rm -f "\$\{pacstrap_dir\}/usr/lib/systemd/system/timers\.target\.wants'
+    r'/archlinux-keyring-wkd-sync\.timer")'
+)
+replacement = (
+    r'\1\n'
+    r'\t# parental-os: copy Calamares module files into airootfs after pacstrap\n'
+    r'\tcp -r "${pacstrap_dir}/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"'
+    r' "${pacstrap_dir}/etc/calamares/modules/pacstrap.conf" 2>/dev/null || true\n'
+    r'\tcp -r "${pacstrap_dir}/usr/share/calamares/src/modules/shellprocess/shellprocess-before-online.conf"'
+    r' "${pacstrap_dir}/etc/calamares/modules/shellprocess-before-online.conf" 2>/dev/null || true\n'
+    r'\tcp -r "${pacstrap_dir}/usr/share/calamares/src/modules/services-systemd/services-systemd.conf"'
+    r' "${pacstrap_dir}/etc/calamares/modules/services-systemd.conf" 2>/dev/null || true\n'
+    r'\tcp -r "${pacstrap_dir}/usr/share/calamares/src/modules/shellprocess/shellprocess_cleanup_calamares.conf"'
+    r' "${pacstrap_dir}/etc/calamares/modules/shellprocess_cleanup_calamares.conf" 2>/dev/null || true'
+)
+new_content = re.sub(pattern, replacement, content, count=1)
+if new_content == content:
+    print(f"WARNING: pattern not found in {path}; mkarchiso may have changed layout")
+else:
+    with open(path, 'w') as f:
+        f.write(new_content)
+    print(f"Patched {path} with parental-os Calamares module copy hook")
+PYEOF
     else
       log "$util_iso already patched with parental-os Calamares module copy hook"
     fi
