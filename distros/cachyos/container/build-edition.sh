@@ -201,6 +201,34 @@ stage_official_tree() {
 
   mkdir -p "$staged_dir/archiso/airootfs/usr/share/calamares"
   cp -a "$calamares_dir/src" "$staged_dir/archiso/airootfs/usr/share/calamares/src"
+
+  # Patch util-iso.sh to inject the parental-os Calamares module files into
+  # the airootfs after mkarchiso finishes its pacstrap phase. mkarchiso
+  # copies profile/archiso/airootfs/ to the pacstrap dir both before and
+  # after pacstrap; the post-pacstrap copy would overwrite our patched
+  # files — but pacstrap itself fails with "exists in filesystem" if the
+  # files are present pre-pacstrap.  So we hook into mkarchiso after
+  # _make_customize_airootfs to copy the patched module files from
+  # /usr/share/calamares/src/modules/ (which survived pacstrap because it
+  # is not shipped by cachyos-calamares-next) into /etc/calamares/modules/.
+  local util_iso="$staged_dir/util-iso.sh"
+  local marker='rm -f "${pacstrap_dir}\/usr\/lib\/systemd\/system\/timers.target.wants\/archlinux-keyring-wkd-sync.timer"'
+  local parental_hook='cp -r "${pacstrap_dir}\/usr\/share\/calamares\/src\/modules\/pacstrap\/pacstrap.conf" "${pacstrap_dir}\/etc\/calamares\/modules\/pacstrap.conf" 2>\/dev\/null || true\n'
+  parental_hook+='\tcp -r "${pacstrap_dir}\/usr\/share\/calamares\/src\/modules\/shellprocess\/shellprocess-before-online.conf" "${pacstrap_dir}\/etc\/calamares\/modules\/shellprocess-before-online.conf" 2>\/dev\/null || true\n'
+  parental_hook+='\tcp -r "${pacstrap_dir}\/usr\/share\/calamares\/src\/modules\/services-systemd\/services-systemd.conf" "${pacstrap_dir}\/etc\/calamares\/modules\/services-systemd.conf" 2>\/dev\/null || true\n'
+  parental_hook+='\tcp -r "${pacstrap_dir}\/usr\/share\/calamares\/src\/modules\/shellprocess\/shellprocess_cleanup_calamares.conf" "${pacstrap_dir}\/etc\/calamares\/modules\/shellprocess_cleanup_calamares.conf" 2>\/dev\/null || true'
+  if [[ -f "$util_iso" ]]; then
+    if ! grep -q 'parental-os: copy Calamares module files' "$util_iso" 2>/dev/null; then
+      sudo sed -i \
+        "s|${marker}|${marker}\n\t# parental-os: copy Calamares module files into airootfs after pacstrap\n\t${parental_hook}|" \
+        "$util_iso"
+      log "Patched $util_iso with parental-os Calamares module copy hook"
+    else
+      log "$util_iso already patched with parental-os Calamares module copy hook"
+    fi
+  else
+    log "warning: $util_iso not found; cannot patch mkarchiso for Calamares module files"
+  fi
 }
 
 run_official_build() {
