@@ -457,6 +457,12 @@ def main() -> int:
         copy_transformer_to_live(live_airootfs_dir, transformer_src)
         copy_runtime_source_to_live(calamares_src_dir, live_airootfs_dir)
         patch_calamares_online(calamares_src_dir, live_airootfs_dir, expected_package)
+        # Also install the patched files directly into /etc/calamares/modules/
+        # so they are available even before calamares-online.sh re-runs the
+        # transformer in runtime mode. This covers the offline install path
+        # and the gap between calamares-online.sh reinstalling the package
+        # and re-running the transformer.
+        install_live_calamares_files(calamares_src_dir, live_airootfs_dir)
     elif mode == "runtime":
         install_live_calamares_files(calamares_src_dir, live_airootfs_dir)
     else:
