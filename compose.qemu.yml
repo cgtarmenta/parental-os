@@ -1,0 +1,22 @@
+services:
+  qemu-browser:
+    build:
+      context: ./distros/qemu-browser
+      dockerfile: Dockerfile
+    environment:
+      PARENTAL_OS_ISO: /iso/boot.iso
+      PARENTAL_OS_QEMU_RAM: ${PARENTAL_OS_QEMU_RAM:-4096}
+      PARENTAL_OS_QEMU_CPUS: ${PARENTAL_OS_QEMU_CPUS:-2}
+      PARENTAL_OS_QEMU_DISK_SIZE: ${PARENTAL_OS_QEMU_DISK_SIZE:-20G}
+      PARENTAL_OS_QEMU_STATE_DIR: /state
+      PARENTAL_OS_QEMU_SEED_ISO: /out/qemu/seed.iso
+      PARENTAL_OS_CONTAINER_SSH_PORT: 2222
+    volumes:
+      - ${PARENTAL_OS_ISO_PATH:?PARENTAL_OS_ISO_PATH is required}:/iso/boot.iso:ro
+      - ./out:/out
+      - ./out/qemu/browser/${PARENTAL_OS_BROWSER_TARGET:?PARENTAL_OS_BROWSER_TARGET is required}:/state
+    ports:
+      - ${PARENTAL_OS_BIND_IP:-127.0.0.1}:${PARENTAL_OS_WEB_PORT:-8011}:8006
+      - ${PARENTAL_OS_BIND_IP:-127.0.0.1}:${PARENTAL_OS_BROWSER_SSH_PORT:-2222}:2222
+    restart: unless-stopped
+    stop_grace_period: 30s

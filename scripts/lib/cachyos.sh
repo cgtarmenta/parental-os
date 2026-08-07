@@ -28,7 +28,7 @@ cachyos_edition_metadata() {
       printf 'architecture=x86_64\n'
       printf 'iso_basename=parental-os-cachyos-desktop\n'
       printf 'calamares_package=cachyos-calamares-next\n'
-      printf 'required_packages=parental-guard cachyos-calamares-next linux-cachyos\n'
+      printf 'required_packages=parental-guard cachyos-calamares-next linux-cachyos cloud-init openssh qemu-guest-agent\n'
       printf 'forbidden_packages=linux-cachyos-deckify cachyos-calamares-deckify steamdeck-firmware plasma-keyboard\n'
       ;;
     handheld)
@@ -43,7 +43,7 @@ cachyos_edition_metadata() {
       printf 'architecture=x86_64\n'
       printf 'iso_basename=parental-os-cachyos-handheld\n'
       printf 'calamares_package=cachyos-calamares-deckify\n'
-      printf 'required_packages=linux-cachyos-deckify steamdeck-firmware plasma-keyboard parental-guard cachyos-calamares-deckify\n'
+      printf 'required_packages=linux-cachyos-deckify steamdeck-firmware plasma-keyboard parental-guard cachyos-calamares-deckify cloud-init openssh qemu-guest-agent\n'
       printf 'forbidden_packages=linux-cachyos cachyos-calamares-next\n'
       ;;
     *)
