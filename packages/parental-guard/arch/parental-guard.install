@@ -32,7 +32,17 @@ post_install() {
   remove_temp_parental_repo
   groupadd --system parental-users 2>/dev/null || groupadd parental-users 2>/dev/null || true
   systemctl daemon-reload >/dev/null 2>&1 || true
-  systemctl enable parental-guard.service parental-guard-agent.service >/dev/null 2>&1 || true
+  # parental-guard-enroll.{service,path} are what put interactive users into
+  # parental-users. Without them the group stays empty and the sudoers policy
+  # applies to nobody, which is exactly how an install once looked healthy while
+  # enforcing nothing.
+  systemctl enable parental-guard.service parental-guard-agent.service \
+    parental-guard-enroll.service parental-guard-enroll.path >/dev/null 2>&1 || true
+  # Enroll whoever already exists (the account the installer created), rather than
+  # waiting for a reboot to apply the policy for the first time.
+  if [[ -x /usr/lib/parental-os/enroll-users.sh ]]; then
+    /usr/lib/parental-os/enroll-users.sh || true
+  fi
 }
 
 post_upgrade() {

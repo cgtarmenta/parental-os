@@ -1,0 +1,16 @@
+[Unit]
+Description=parental-os interactive user enrollment
+Documentation=man:usermod(8)
+# Must be settled before anyone can log in, otherwise a session starts under a
+# sudoers policy that does not yet apply to it.
+Before=systemd-user-sessions.service display-manager.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/parental-os/config.env
+ExecStart=/usr/lib/parental-os/enroll-users.sh
+
+[Install]
+WantedBy=multi-user.target
