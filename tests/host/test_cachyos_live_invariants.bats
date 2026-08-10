@@ -135,13 +135,41 @@ EOF
 # leaves a dangling link.
 # ---------------------------------------------------------------------------
 
-@test "build-edition enables cloud-init.target" {
-  grep -q 'cloud-init.target' "$BUILD_EDITION"
+@test "build-edition enables every cloud-init stage unit, not just the target" {
+  # Enabling cloud-init.target alone is a no-op: cloud-init ships no
+  # cloud-init.target.wants/ symlinks, Arch never auto-enables units, and the
+  # target is ordered After=multi-user.target so it cannot pull the stages that
+  # have to run before login. Each stage unit must be wanted by multi-user.target.
+  for unit in \
+    cloud-init-local.service \
+    cloud-init-network.service \
+    cloud-config.service \
+    cloud-final.service; do
+    grep -qF "$unit" "$BUILD_EDITION"
+  done
 }
 
 @test "build-edition does not symlink the removed cloud-init.service" {
-  run grep -E '^\s*cloud-init\.service\s*\\?$' "$BUILD_EDITION"
+  # cloud-init >= 24.3 renamed it to cloud-init-network.service. Inspect the unit
+  # list of the enablement loop rather than the whole file: the surrounding
+  # comments legitimately name the obsolete unit to explain why it is gone, and a
+  # file-wide grep matches that prose instead of any actual symlink.
+  units="$(sed -n '/for unit in \\/,/^  done$/p' "$BUILD_EDITION")"
+  [ -n "$units" ]
+  [[ "$units" == *"cloud-init-network.service"* ]]
+  run grep -E '^[[:space:]]*cloud-init\.service[[:space:]]*\\?$' <<<"$units"
   [ "$status" -ne 0 ]
+}
+
+@test "post-pacstrap hook fails the build on a dangling enablement symlink" {
+  # The symlinks are created while staging, before any package exists to point at,
+  # so nothing can validate them until pacstrap has run. Without this assertion a
+  # renamed unit silently costs SSH access to the live VM -- and with it the
+  # Calamares install log, which is what let a debugging loop run for 11 commits.
+  hook="$(sed -n '/parental-os: the enablement symlinks/,/^)/p' "$BUILD_EDITION")"
+  [ -n "$hook" ]
+  [[ "$hook" == *"cloud-init-network.service"* ]]
+  [[ "$hook" == *"exit 1"* ]]
 }
 
 # ---------------------------------------------------------------------------

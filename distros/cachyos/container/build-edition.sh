@@ -191,13 +191,25 @@ stage_official_tree() {
 
   wants_dir="$staged_dir/archiso/airootfs/etc/systemd/system/multi-user.target.wants"
   mkdir -p "$wants_dir"
-  # cloud-init >= 24.3 renamed cloud-init.service to cloud-init-network.service
-  # and makes every stage unit WantedBy=cloud-init.target, so enabling the target
-  # is the only forward-compatible way to turn cloud-init on. Symlinking the
-  # individual stage services leaves a dangling cloud-init.service link and, with
-  # it, no SSH into the live VM -- which is what made the Calamares install logs
-  # unreachable while debugging target integration.
+  # Arch packages never auto-enable units, and cloud-init ships no pre-created
+  # cloud-init.target.wants/ symlinks, so each stage unit has to be wanted by
+  # multi-user.target explicitly. Enabling cloud-init.target alone accomplishes
+  # nothing: its .wants directory is empty and it is ordered
+  # After=multi-user.target, so it cannot pull the stages that must run before
+  # login.
+  #
+  # cloud-init >= 24.3 renamed cloud-init.service to cloud-init-network.service.
+  # Naming the obsolete unit leaves a dangling symlink, cloud-init never completes,
+  # and there is then no SSH into the live VM -- which is exactly what kept the
+  # Calamares install logs unreachable while target integration was being debugged.
+  # patch_mkarchiso_post_pacstrap asserts every one of these resolves once the
+  # packages are actually installed, so a future rename fails the build instead of
+  # silently costing us VM access again.
   for unit in \
+    cloud-init-local.service \
+    cloud-init-network.service \
+    cloud-config.service \
+    cloud-final.service \
     cloud-init.target \
     sshd.service \
     qemu-guest-agent.service; do
@@ -292,6 +304,21 @@ insert = (
     '        # Re-apply [parental-os] stanza to pacman.conf\n'
     '        printf "\\n# BEGIN parental-os temporary repository\\n[parental-os]\\nSigLevel = Optional TrustAll\\nServer = file:///srv/parental-os-repo\\n# END parental-os temporary repository\\n" >> "${pacstrap_dir}/etc/pacman.conf"\n'
     '        printf "\\n# BEGIN parental-os temporary repository\\n[parental-os]\\nSigLevel = Optional TrustAll\\nServer = file:///srv/parental-os-repo\\n# END parental-os temporary repository\\n" >> "${pacstrap_dir}/etc/pacman-more.conf"\n'
+    '        # parental-os: the enablement symlinks were created while staging the\n'
+    '        # profile, before any package existed to point at. Now that pacstrap has\n'
+    '        # installed them, assert every target actually resolves. A stale unit name\n'
+    '        # (cloud-init renamed cloud-init.service to cloud-init-network.service in\n'
+    '        # 24.3) otherwise leaves a dangling symlink that costs SSH access to the\n'
+    '        # live VM, and with it any ability to read the Calamares install log.\n'
+    '        for _parental_unit in \\\n'
+    '          cloud-init-local.service cloud-init-network.service \\\n'
+    '          cloud-config.service cloud-final.service cloud-init.target \\\n'
+    '          sshd.service qemu-guest-agent.service; do\n'
+    '          if [[ ! -e "${pacstrap_dir}/usr/lib/systemd/system/${_parental_unit}" ]]; then\n'
+    '            printf "parental-os: FATAL: unit %s is not present in the image; its multi-user.target.wants symlink would dangle\\n" "$_parental_unit" >&2\n'
+    '            exit 1\n'
+    '          fi\n'
+    '        done\n'
 )
 last_idx = content.rfind(marker)
 if last_idx == -1:
