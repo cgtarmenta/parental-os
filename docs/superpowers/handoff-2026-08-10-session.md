@@ -223,24 +223,68 @@ reachable.
 
 ## Next steps
 
-Booting and installing need no manual disk handling. `just qemu-browser
-cachyos-desktop` regenerates the cloud-init seed and starts everything;
-`distros/qemu-browser/entrypoint.sh` passes `-boot d`, so the VM always boots the
-live ISO from CD-ROM and never the installed system, and Calamares reformats the
-target during the partition step anyway. The `browser.qcow2` file does persist
-between runs (the entrypoint only creates it when absent), but its contents do not
-affect either step below.
+### How the VM is actually driven
+
+`just qemu-browser cachyos-desktop` regenerates the cloud-init seed and starts
+everything. No manual disk handling is needed at any point.
+
+`distros/qemu-browser/entrypoint.sh` passes `-boot d`, so the VM boots the live ISO
+from CD-ROM. To reach the **installed** system afterwards: run the Calamares
+install, reboot the VM, and at the ISOLINUX menu choose **"Boot existing OS"**,
+which chain-loads from the virtio disk. That is how the installed target gets
+verified.
+
+So `browser.qcow2` persisting between runs is a requirement of this workflow, not
+leftover state — it *is* the artifact under test. It needs no cleaning between
+attempts either, because Calamares reformats the target during partitioning.
 
 1. Boot the rebuilt ISO and verify SSH into the live environment works. That is
    the end-to-end proof of cause 3, and the prerequisite for everything else.
-2. Run a Calamares install and confirm the target has `parental-guard`, the
-   sudoers policy, and the polkit rules. If anything fails, read
+2. Run a Calamares install, reboot, and boot the installed system via
+   "Boot existing OS". Run the acceptance checklist below. If anything fails, read
    `/var/log/calamares/session.log` rather than hypothesising — that log going
    unread across eleven fix attempts is the single biggest reason this took as
-   long as it did.
+   long as it did. Calamares also copies its log to the target, so it is still
+   readable after rebooting into the installed system.
 3. Build `handheld` to confirm. It shares all three code paths with `desktop`, so
    it is a confirmation build, not a diagnostic one.
 4. Push and open the PR into `dev`. The merge is a fast-forward.
+
+## Acceptance checklist for the installed target
+
+Run these after booting the installed system via "Boot existing OS". The first
+group is what the whole task is for; the second group is the cleanup that must
+*not* leave temporary build scaffolding behind on a user's machine.
+
+Present:
+
+```
+pacman -Qi parental-guard                       # installed, with version
+systemctl is-enabled parental-guard.service parental-guard-agent.service
+getent group parental-users                     # group exists
+ls -la /etc/sudoers.d/                          # parental-os drop-in present
+visudo -c                                       # sudoers still valid
+ls -la /etc/polkit-1/rules.d/                   # parental-os rule present
+```
+
+Then confirm the policy actually bites: as the unprivileged child user, `sudo su`
+must be refused. An install that produces the files but leaves sudo unrestricted is
+still a failure — that exact combination (no parental-guard, `sudo su` working
+freely) was the original symptom.
+
+Absent — the temporary repository must not survive onto the installed system:
+
+```
+grep -n -A3 '\[parental-os\]' /etc/pacman.conf     # must find nothing
+grep -n -A3 '\[parental-os\]' /etc/pacman-more.conf # must find nothing
+ls /srv/parental-os-repo                            # must not exist
+```
+
+That cleanup is driven by `shellprocess@cleanup_calamares` running
+`/etc/calamares/scripts/remove-parental-os-repo`, which reaches the target through
+`pacstrap.conf`'s `postInstallFiles`. Worth checking explicitly, because the
+pacstrap module copies those files with a bare `if os.path.exists()` and only
+`warning()`s on failure — a missing script there fails silently.
 
 ## Useful files
 
