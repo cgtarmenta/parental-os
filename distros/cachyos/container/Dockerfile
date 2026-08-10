@@ -57,10 +57,18 @@ RUN useradd -m -G wheel -s /bin/bash builder
 # and the build entrypoint without a password.
 # This is NOT a blanket ALL=NOPASSWD: ALL grant.
 RUN mkdir -p /etc/sudoers.d \
-    && printf 'builder ALL=(root) NOPASSWD: /usr/bin/mkarchiso, /usr/bin/pacman, /usr/bin/pacman-key, /usr/bin/repo-add, /usr/bin/repo-remove, /usr/bin/sed, /usr/bin/rm, /usr/bin/chown builder *, /usr/bin/bash /usr/local/bin/build-edition.sh *\n' \
+     && printf 'builder ALL=(root) NOPASSWD: /usr/bin/mkarchiso, /usr/bin/pacman, /usr/bin/pacman-key, /usr/bin/repo-add, /usr/bin/repo-remove, /usr/bin/sed, /usr/bin/rm, /usr/bin/chown builder *, /usr/bin/tee, /usr/bin/mkdir, /usr/bin/python3, /usr/bin/bash /usr/local/bin/build-edition.sh *\n' \
        > /etc/sudoers.d/builder \
     && chmod 440 /etc/sudoers.d/builder \
     && visudo -cf /etc/sudoers.d/builder
+
+# Note: We used to patch pacstrap with --noconfirm to avoid provider
+# selection prompts, but this caused post-install hooks to fail silently
+# (command failed to execute correctly), resulting in a broken live ISO.
+# Instead, the builder image is kept up-to-date with --no-cache so that
+# packages resolve without mismatches, and --noconfirm is passed by
+# mkarchiso's own pacman.conf (NoConfirm is not a valid pacman.conf option,
+# but mkarchiso strips the config anyway).
 
 # Create the local parental-os repository directory on the container filesystem
 # so mkarchiso's pacstrap can access it via file:///srv/parental-os-repo.

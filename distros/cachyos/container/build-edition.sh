@@ -159,6 +159,7 @@ stage_official_tree() {
 
   [[ -f "$staged_dir/buildiso.sh" ]] || die "official buildiso.sh not found in $staged_dir"
   [[ -f "$staged_dir/archiso/$packages_file" ]] || die "packages file not found: $packages_file"
+
   for pkg in $required_packages; do
     if ! grep -qx "$pkg" "$staged_dir/archiso/$packages_file"; then
       printf '%s\n' "$pkg" >>"$staged_dir/archiso/$packages_file"
@@ -199,58 +200,63 @@ stage_official_tree() {
     "$REPO_DIR/distros/cachyos/calamares/apply-parental-overlay.py" \
     "$calamares_package" >/dev/null
 
+  # Stash Calamares scripts inside the repo so the post-pacstrap hook can
+  # copy them to /etc/calamares/scripts/ in the airootfs.  Must be after
+  # apply-parental-overlay.py because that transformer creates the scripts.
+  if [[ -d "$calamares_dir/scripts" ]]; then
+    mkdir -p "$staged_dir/archiso/airootfs/srv/parental-os-repo/scripts"
+    cp -a "$calamares_dir/scripts/." "$staged_dir/archiso/airootfs/srv/parental-os-repo/scripts/"
+    log "stage_official_tree: stashed Calamares scripts in repo"
+  fi
+
   mkdir -p "$staged_dir/archiso/airootfs/usr/share/calamares"
   cp -a "$calamares_dir/src" "$staged_dir/archiso/airootfs/usr/share/calamares/src"
 
-  # Patch util-iso.sh to inject the parental-os Calamares module files into
-  # the airootfs after mkarchiso finishes its pacstrap phase. mkarchiso
-  # copies profile/archiso/airootfs/ to the pacstrap dir both before and
-  # after pacstrap; the post-pacstrap copy would overwrite our patched
-  # files — but pacstrap itself fails with "exists in filesystem" if the
-  # files are present pre-pacstrap.  So we hook into mkarchiso after
-  # _make_customize_airootfs to copy the patched module files from
-  # /usr/share/calamares/src/modules/ (which survived pacstrap because it
-  # is not shipped by cachyos-calamares-next) into /etc/calamares/modules/.
-  local util_iso="$staged_dir/util-iso.sh"
-  if [[ -f "$util_iso" ]]; then
-    if ! grep -q 'parental-os: copy Calamares module files' "$util_iso" 2>/dev/null; then
-      python3 - "$util_iso" <<'PYEOF'
-import sys, re
+  # Patch mkarchiso to run post-pacstrap tasks: copy Calamares module .conf
+  # files, copy Calamares scripts, copy srv/parental-os-repo, and re-apply
+  # the [parental-os] stanza (pacstrap overwrites pacman.conf).
+  local _mkarchiso="/usr/bin/mkarchiso"
+  sudo python3 - "$_mkarchiso" <<'PYEOF'
+import sys
 path = sys.argv[1]
 with open(path) as f:
     content = f.read()
-# Find the line in modify_mkarchiso that removes the keyring timer.
-# We insert our copy commands right after it.
-pattern = (
-    r'(rm -f "\$\{pacstrap_dir\}/usr/lib/systemd/system/timers\.target\.wants'
-    r'/archlinux-keyring-wkd-sync\.timer")'
+HOOK_MARKER = '# parental-os: post-pacstrap tasks'
+if HOOK_MARKER in content:
+    print(f"{path} already patched; skipping")
+    sys.exit(0)
+marker = '        env -u TMPDIR pacstrap "${_pacstrap_options[@]}"'
+insert = (
+    '\n        # parental-os: post-pacstrap tasks\n'
+    '        # Copy Calamares module .conf files into airootfs\n'
+    '        cp -r "${pacstrap_dir}/usr/share/calamares/src/modules/pacstrap/pacstrap.conf" "${pacstrap_dir}/etc/calamares/modules/pacstrap.conf" 2>/dev/null || true\n'
+    '        cp -r "${pacstrap_dir}/usr/share/calamares/src/modules/shellprocess/shellprocess-before-online.conf" "${pacstrap_dir}/etc/calamares/modules/shellprocess-before-online.conf" 2>/dev/null || true\n'
+    '        cp -r "${pacstrap_dir}/usr/share/calamares/src/modules/services-systemd/services-systemd.conf" "${pacstrap_dir}/etc/calamares/modules/services-systemd.conf" 2>/dev/null || true\n'
+    '        cp -r "${pacstrap_dir}/usr/share/calamares/src/modules/shellprocess/shellprocess_cleanup_calamares.conf" "${pacstrap_dir}/etc/calamares/modules/shellprocess_cleanup_calamares.conf" 2>/dev/null || true\n'
+    '        # Copy Calamares scripts and repo dir into airootfs\n'
+    '        _parental_repo_src="${pacstrap_dir}/srv/parental-os-repo"\n'
+    '        if [[ ! -d "$_parental_repo_src" ]]; then\n'
+    '          _parental_repo_src="${work_dir}/archiso/airootfs/srv/parental-os-repo"\n'
+    '        fi\n'
+    '        if [[ -d "$_parental_repo_src" ]]; then\n'
+    '          mkdir -p "${pacstrap_dir}/srv"\n'
+    '          cp -a "$_parental_repo_src" "${pacstrap_dir}/srv/parental-os-repo" 2>/dev/null || true\n'
+    '          mkdir -p "${pacstrap_dir}/etc/calamares/scripts"\n'
+    '          cp -r "${pacstrap_dir}/srv/parental-os-repo/scripts/." "${pacstrap_dir}/etc/calamares/scripts/" 2>/dev/null || true\n'
+    '        fi\n'
+    '        # Re-apply [parental-os] stanza to pacman.conf\n'
+    '        printf "\\n# BEGIN parental-os temporary repository\\n[parental-os]\\nSigLevel = Optional TrustAll\\nServer = file:///srv/parental-os-repo\\n# END parental-os temporary repository\\n" >> "${pacstrap_dir}/etc/pacman.conf"\n'
+    '        printf "\\n# BEGIN parental-os temporary repository\\n[parental-os]\\nSigLevel = Optional TrustAll\\nServer = http://127.0.0.1:8765\\n# END parental-os temporary repository\\n" >> "${pacstrap_dir}/etc/pacman-more.conf"\n'
 )
-replacement = (
-    r'\1\n'
-    r'\t# parental-os: copy Calamares module files into airootfs after pacstrap\n'
-    r'\tcp -r "${pacstrap_dir}/usr/share/calamares/src/modules/pacstrap/pacstrap.conf"'
-    r' "${pacstrap_dir}/etc/calamares/modules/pacstrap.conf" 2>/dev/null || true\n'
-    r'\tcp -r "${pacstrap_dir}/usr/share/calamares/src/modules/shellprocess/shellprocess-before-online.conf"'
-    r' "${pacstrap_dir}/etc/calamares/modules/shellprocess-before-online.conf" 2>/dev/null || true\n'
-    r'\tcp -r "${pacstrap_dir}/usr/share/calamares/src/modules/services-systemd/services-systemd.conf"'
-    r' "${pacstrap_dir}/etc/calamares/modules/services-systemd.conf" 2>/dev/null || true\n'
-    r'\tcp -r "${pacstrap_dir}/usr/share/calamares/src/modules/shellprocess/shellprocess_cleanup_calamares.conf"'
-    r' "${pacstrap_dir}/etc/calamares/modules/shellprocess_cleanup_calamares.conf" 2>/dev/null || true'
-)
-new_content = re.sub(pattern, replacement, content, count=1)
-if new_content == content:
-    print(f"WARNING: pattern not found in {path}; mkarchiso may have changed layout")
-else:
-    with open(path, 'w') as f:
-        f.write(new_content)
-    print(f"Patched {path} with parental-os Calamares module copy hook")
+last_idx = content.rfind(marker)
+if last_idx == -1:
+    print(f"WARNING: pattern not found in {path}; mkarchiso hook not applied")
+    sys.exit(0)
+new_content = content[:last_idx + len(marker)] + insert + content[last_idx + len(marker):]
+with open(path, 'w') as f:
+    f.write(new_content)
+print(f"Patched {path} with parental-os post-pacstrap tasks")
 PYEOF
-    else
-      log "$util_iso already patched with parental-os Calamares module copy hook"
-    fi
-  else
-    log "warning: $util_iso not found; cannot patch mkarchiso for Calamares module files"
-  fi
 }
 
 run_official_build() {

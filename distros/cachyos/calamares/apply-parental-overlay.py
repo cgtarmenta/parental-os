@@ -260,7 +260,11 @@ def install_target_repo_copy(calamares_src_dir: Path) -> None:
         "fi\n"
         'install -d "$target_root/srv"\n'
         'rm -rf -- "$target_root/srv/parental-os-repo"\n'
-        'cp -a "$source_repo" "$target_root/srv/parental-os-repo"\n',
+        'cp -a "$source_repo" "$target_root/srv/parental-os-repo"\n'
+        '# Switch the repo URL from http:// to file:// so pacstrap in the target\n'
+        '# chroot can find it without needing network access to the live host.\n'
+        'sed -i "s|http://127.0.0.1:8765|file:///srv/parental-os-repo|g" \\\n'
+        '  "$target_root/etc/pacman.conf" 2>/dev/null || true\n',
         encoding="utf-8",
     )
     copy_script.chmod(0o755)
@@ -457,12 +461,8 @@ def main() -> int:
         copy_transformer_to_live(live_airootfs_dir, transformer_src)
         copy_runtime_source_to_live(calamares_src_dir, live_airootfs_dir)
         patch_calamares_online(calamares_src_dir, live_airootfs_dir, expected_package)
-        # Also install the patched files directly into /etc/calamares/modules/
-        # so they are available even before calamares-online.sh re-runs the
-        # transformer in runtime mode. This covers the offline install path
-        # and the gap between calamares-online.sh reinstalling the package
-        # and re-running the transformer.
-        install_live_calamares_files(calamares_src_dir, live_airootfs_dir)
+        # Patched module .conf files are NOT copied to airootfs during staging.
+        # They will be copied post-pacstrap by the mkarchiso hook in build-edition.sh.
     elif mode == "runtime":
         install_live_calamares_files(calamares_src_dir, live_airootfs_dir)
     else:
