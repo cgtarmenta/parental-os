@@ -118,6 +118,27 @@ EOF
   sed -i "s|PLACEHOLDER_PARENTAL_OS_REPO_SERVER|$server|" "$file"
 }
 
+# archiso copies airootfs/ with --no-preserve=mode and then restores only the
+# modes declared in profiledef.sh's file_permissions array; anything absent from
+# that array lands as 644. A chmod applied while staging the profile is therefore
+# discarded, so every executable we add to the live image must be registered here
+# or it silently ships non-executable.
+register_parental_file_permissions() {
+  local profiledef="$1"
+  [[ -f "$profiledef" ]] || die "profiledef.sh not found: $profiledef"
+  grep -q '^file_permissions=(' "$profiledef" \
+    || die "file_permissions array not found in $profiledef; upstream layout may have changed"
+  if grep -q '/usr/local/lib/parental-os/apply-parental-overlay.py' "$profiledef"; then
+    return 0
+  fi
+  sed -i \
+    '/^file_permissions=(/a\  ["/usr/local/lib/parental-os/apply-parental-overlay.py"]="0:0:755"' \
+    "$profiledef"
+  grep -q '/usr/local/lib/parental-os/apply-parental-overlay.py' "$profiledef" \
+    || die "failed to register parental-os file permissions in $profiledef"
+  log "registered parental-os file permissions in $profiledef"
+}
+
 install_live_repo_service() {
   local live_root="$1"
   local service_dir="$live_root/etc/systemd/system"
@@ -142,7 +163,7 @@ EOF
 
 stage_official_tree() {
   local edition="$1" live_iso_dir="$2" calamares_dir="$3" repo_dir="$4" staged_dir="$5"
-  local packages_file calamares_package required_packages pkg service wants_dir
+  local packages_file calamares_package required_packages pkg unit wants_dir
   packages_file="$(cachyos_metadata_value "$edition" packages_file)" || return 1
   calamares_package="$(cachyos_metadata_value "$edition" calamares_package)" || return 1
   required_packages="$(cachyos_metadata_value "$edition" required_packages)" || return 1
@@ -160,6 +181,8 @@ stage_official_tree() {
   [[ -f "$staged_dir/buildiso.sh" ]] || die "official buildiso.sh not found in $staged_dir"
   [[ -f "$staged_dir/archiso/$packages_file" ]] || die "packages file not found: $packages_file"
 
+  register_parental_file_permissions "$staged_dir/archiso/profiledef.sh"
+
   for pkg in $required_packages; do
     if ! grep -qx "$pkg" "$staged_dir/archiso/$packages_file"; then
       printf '%s\n' "$pkg" >>"$staged_dir/archiso/$packages_file"
@@ -168,26 +191,34 @@ stage_official_tree() {
 
   wants_dir="$staged_dir/archiso/airootfs/etc/systemd/system/multi-user.target.wants"
   mkdir -p "$wants_dir"
-  for service in \
-    cloud-init-local.service \
-    cloud-init.service \
-    cloud-config.service \
-    cloud-final.service \
+  # cloud-init >= 24.3 renamed cloud-init.service to cloud-init-network.service
+  # and makes every stage unit WantedBy=cloud-init.target, so enabling the target
+  # is the only forward-compatible way to turn cloud-init on. Symlinking the
+  # individual stage services leaves a dangling cloud-init.service link and, with
+  # it, no SSH into the live VM -- which is what made the Calamares install logs
+  # unreachable while debugging target integration.
+  for unit in \
+    cloud-init.target \
     sshd.service \
     qemu-guest-agent.service; do
-    ln -sfn "/usr/lib/systemd/system/$service" "$wants_dir/$service"
+    ln -sfn "/usr/lib/systemd/system/$unit" "$wants_dir/$unit"
   done
 
+  # Every pacman config that can reach the target must resolve [parental-os] over
+  # file:///srv/parental-os-repo. In particular pacman-more.conf: upstream's
+  # shellprocess@before-online copies it verbatim over ${ROOT}/etc/pacman.conf
+  # immediately before pacstrap, so whatever URL it carries is the URL pacstrap
+  # uses. Pointing it at file:// makes the install self-contained and removes any
+  # dependency on the ordering of our command relative to upstream's.
   append_parental_repo_stanza "$staged_dir/archiso/pacman.conf"
   append_parental_repo_stanza \
-    "$staged_dir/archiso/airootfs/etc/pacman-more.conf" \
-    "http://127.0.0.1:8765"
+    "$staged_dir/archiso/airootfs/etc/pacman-more.conf"
   local live_pacman_conf="$staged_dir/archiso/airootfs/etc/pacman.conf"
   if [[ ! -f "$live_pacman_conf" ]]; then
     mkdir -p "${live_pacman_conf%/*}"
     cp "$staged_dir/archiso/pacman.conf" "$live_pacman_conf"
   fi
-  append_parental_repo_stanza "$live_pacman_conf" "http://127.0.0.1:8765"
+  append_parental_repo_stanza "$live_pacman_conf"
 
   mkdir -p "$staged_dir/archiso/airootfs/srv/parental-os-repo"
   cp -a "$repo_dir/." "$staged_dir/archiso/airootfs/srv/parental-os-repo/"
@@ -212,10 +243,24 @@ stage_official_tree() {
   mkdir -p "$staged_dir/archiso/airootfs/usr/share/calamares"
   cp -a "$calamares_dir/src" "$staged_dir/archiso/airootfs/usr/share/calamares/src"
 
-  # Patch mkarchiso to run post-pacstrap tasks: copy Calamares module .conf
-  # files, copy Calamares scripts, copy srv/parental-os-repo, and re-apply
-  # the [parental-os] stanza (pacstrap overwrites pacman.conf).
-  local _mkarchiso="/usr/bin/mkarchiso"
+}
+
+# Patch mkarchiso to run post-pacstrap tasks: copy Calamares module .conf files,
+# copy Calamares scripts, copy srv/parental-os-repo, and re-apply the
+# [parental-os] stanza.
+#
+# This is required because archiso copies the profile's airootfs/ into the image
+# BEFORE running pacstrap (verifiable in any build log: "Copying custom airootfs
+# files..." precedes "Installing packages to ..."). Every path that collides with
+# a file owned by cachyos-calamares-next is therefore overwritten by the package,
+# so our Calamares configuration has to be re-applied after pacstrap completes.
+#
+# Kept separate from stage_official_tree because this mutates the *builder
+# environment* rather than the staged profile, and only makes sense inside the
+# privileged builder container.
+patch_mkarchiso_post_pacstrap() {
+  local _mkarchiso="${1:-/usr/bin/mkarchiso}"
+  [[ -f "$_mkarchiso" ]] || die "mkarchiso not found at $_mkarchiso"
   sudo python3 - "$_mkarchiso" <<'PYEOF'
 import sys
 path = sys.argv[1]
@@ -246,12 +291,20 @@ insert = (
     '        fi\n'
     '        # Re-apply [parental-os] stanza to pacman.conf\n'
     '        printf "\\n# BEGIN parental-os temporary repository\\n[parental-os]\\nSigLevel = Optional TrustAll\\nServer = file:///srv/parental-os-repo\\n# END parental-os temporary repository\\n" >> "${pacstrap_dir}/etc/pacman.conf"\n'
-    '        printf "\\n# BEGIN parental-os temporary repository\\n[parental-os]\\nSigLevel = Optional TrustAll\\nServer = http://127.0.0.1:8765\\n# END parental-os temporary repository\\n" >> "${pacstrap_dir}/etc/pacman-more.conf"\n'
+    '        printf "\\n# BEGIN parental-os temporary repository\\n[parental-os]\\nSigLevel = Optional TrustAll\\nServer = file:///srv/parental-os-repo\\n# END parental-os temporary repository\\n" >> "${pacstrap_dir}/etc/pacman-more.conf"\n'
 )
 last_idx = content.rfind(marker)
 if last_idx == -1:
-    print(f"WARNING: pattern not found in {path}; mkarchiso hook not applied")
-    sys.exit(0)
+    # Fail closed. Continuing here would produce an ISO whose Calamares
+    # configuration was silently reverted by the package install, i.e. an image
+    # that installs a target with no parental-guard while the build reports
+    # success.
+    print(
+        f"ERROR: pacstrap invocation not found in {path}; "
+        "upstream mkarchiso layout may have changed",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 new_content = content[:last_idx + len(marker)] + insert + content[last_idx + len(marker):]
 with open(path, 'w') as f:
     f.write(new_content)
@@ -328,6 +381,8 @@ stage_profile() {
   log "=== Staging profile for $edition ==="
   stage_official_tree "$edition" "$live_iso_dir" "$calamares_dir" \
     "$CACHYOS_STAGING/parental-os-repo-srv" "$profile_stage"
+
+  patch_mkarchiso_post_pacstrap
 
   # Place the local repo at the container path consumed by the staged profile.
   cp -a "$CACHYOS_STAGING/parental-os-repo-srv/"* /srv/parental-os-repo/

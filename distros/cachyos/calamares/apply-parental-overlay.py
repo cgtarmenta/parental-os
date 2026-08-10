@@ -109,7 +109,16 @@ def add_cleanup_to_postinstall_files(conf_path: Path) -> None:
 
 
 def add_repo_copy_to_before_online(conf_path: Path) -> None:
-    """Copy the temporary local repository into the target before pacstrap."""
+    """Copy the temporary local repository into the target before pacstrap.
+
+    The command is prepended to the ``script`` list. Its position within that
+    list is intentionally not significant: the only requirement is that it runs
+    somewhere inside shellprocess@before-online, which the Calamares sequence
+    places ahead of pacstrap. The repository URL the target ends up resolving
+    comes from the live ``pacman-more.conf`` that upstream copies over
+    ``${ROOT}/etc/pacman.conf`` later in this same list, so this command does not
+    compete with upstream for ownership of that file.
+    """
     content = load_yaml(conf_path)
     if "dontChroot: true" not in content:
         fail(
@@ -261,10 +270,12 @@ def install_target_repo_copy(calamares_src_dir: Path) -> None:
         'install -d "$target_root/srv"\n'
         'rm -rf -- "$target_root/srv/parental-os-repo"\n'
         'cp -a "$source_repo" "$target_root/srv/parental-os-repo"\n'
-        '# Switch the repo URL from http:// to file:// so pacstrap in the target\n'
-        '# chroot can find it without needing network access to the live host.\n'
-        'sed -i "s|http://127.0.0.1:8765|file:///srv/parental-os-repo|g" \\\n'
-        '  "$target_root/etc/pacman.conf" 2>/dev/null || true\n',
+        "# The repository URL is deliberately NOT rewritten here. Upstream\n"
+        "# CachyOS copies /etc/pacman-more.conf over ${ROOT}/etc/pacman.conf on\n"
+        "# the very next before-online command, so any edit made now would be\n"
+        "# discarded. The live pacman-more.conf therefore already carries\n"
+        '# "Server = file:///srv/parental-os-repo", and pacman resolves that\n'
+        "# inside the target chroot against the tree copied just above.\n",
         encoding="utf-8",
     )
     copy_script.chmod(0o755)
@@ -374,11 +385,31 @@ def patch_calamares_online(
         return
 
     # Insert a reapplication call just before the final calamares exec.
-    # We place the transformer in /usr/local/bin/ on the live filesystem.
+    #
+    # Two properties matter here, and both were learned the hard way:
+    #
+    # 1. The transformer is invoked through python3 rather than executed directly.
+    #    archiso restores only the file modes listed in profiledef.sh's
+    #    file_permissions array, so the transformer can ship mode 644 and a direct
+    #    invocation then dies with "Permission denied".
+    # 2. The call is fail-closed. calamares-online.sh has no `set -e`, so an
+    #    ignored failure here lets Calamares start with the pristine upstream
+    #    configs that the preceding `pacman -Sy` restored. The install then
+    #    completes and looks entirely successful while omitting parental-guard,
+    #    the sudoers policy, and the polkit rules -- a silent failure that is far
+    #    worse than a loud abort.
+    #
+    # The trailing indent restores the leading whitespace of the statement this
+    # block is inserted in front of.
     reapply_line = (
-        "# parental-os: reapply the Calamares parental overlay after the\n"
-        "# CachyOS Calamares package reinstall overwrites our patches.\n"
-        f"sudo {TRANSFORMER_LIVE_PATH} runtime /usr/share/calamares /\n"
+        "# parental-os: reapply the Calamares parental overlay, which the\n"
+        "    # CachyOS Calamares package reinstall above has just overwritten.\n"
+        f"    if ! sudo python3 {TRANSFORMER_LIVE_PATH} runtime /usr/share/calamares /; then\n"
+        '        echo "parental-os: FATAL: could not reapply the Calamares parental overlay" >&2\n'
+        '        echo "parental-os: refusing to start an install that would omit parental-guard" >&2\n'
+        "        exit 1\n"
+        "    fi\n"
+        "    "
     )
 
     # Insert before the line that copies settings.conf or before the exec.

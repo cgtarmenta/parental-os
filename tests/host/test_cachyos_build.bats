@@ -210,6 +210,17 @@ sign_with_key() {
 }
 EOF
   printf '%s\n' base "$calamares_package" "kernel-$edition" >"$destination/archiso/$package_file"
+  # archiso restores only the modes listed in file_permissions, so the staging
+  # step registers our executables here. The fixture must carry the array for
+  # that registration to be exercised.
+  cat >"$destination/archiso/profiledef.sh" <<'EOF'
+#!/usr/bin/env bash
+iso_name="cachyos"
+file_permissions=(
+  ["/etc/shadow"]="0:0:400"
+  ["/usr/local/bin/calamares-online.sh"]="0:0:755"
+)
+EOF
   cat >"$destination/archiso/pacman.conf" <<'EOF'
 [cachyos]
 Server = https://mirror.invalid/$repo/$arch
@@ -618,14 +629,19 @@ EOF
   done
   grep -q '^# BEGIN parental-os temporary repository$' "$staged/archiso/pacman.conf"
   grep -q '^Server = file:///srv/parental-os-repo$' "$staged/archiso/pacman.conf"
+  # pacman-more.conf is copied verbatim over ${ROOT}/etc/pacman.conf by upstream
+  # immediately before pacstrap, so the URL it carries is the URL pacstrap uses.
+  # It must be file:// for the install to be self-contained.
   grep -q '^# BEGIN parental-os temporary repository$' \
     "$staged/archiso/airootfs/etc/pacman-more.conf"
-  grep -q '^Server = http://127.0.0.1:8765$' \
+  grep -q '^Server = file:///srv/parental-os-repo$' \
     "$staged/archiso/airootfs/etc/pacman-more.conf"
   grep -q '^# BEGIN parental-os temporary repository$' \
     "$staged/archiso/airootfs/etc/pacman.conf"
-  grep -q '^Server = http://127.0.0.1:8765$' \
+  grep -q '^Server = file:///srv/parental-os-repo$' \
     "$staged/archiso/airootfs/etc/pacman.conf"
+  grep -q '/usr/local/lib/parental-os/apply-parental-overlay.py' \
+    "$staged/archiso/profiledef.sh"
   [ ! -e "$staged/archiso/airootfs/etc/calamares/modules/pacstrap.conf" ]
   [ ! -e "$staged/archiso/airootfs/etc/calamares/modules/shellprocess-before-online.conf" ]
   repo_service="$staged/archiso/airootfs/etc/systemd/system/parental-os-repo.service"
@@ -635,29 +651,30 @@ EOF
   wants="$staged/archiso/airootfs/etc/systemd/system/multi-user.target.wants"
   [ -L "$wants/parental-os-repo.service" ]
   [ "$(readlink "$wants/parental-os-repo.service")" = "/etc/systemd/system/parental-os-repo.service" ]
-  for service in \
-    cloud-init-local.service \
-    cloud-init.service \
-    cloud-config.service \
-    cloud-final.service \
+  # cloud-init is enabled through cloud-init.target, not by symlinking the
+  # individual stage services: >= 24.3 renamed cloud-init.service to
+  # cloud-init-network.service and makes every stage unit
+  # WantedBy=cloud-init.target, so naming the services leaves a dangling link and
+  # no working cloud-init.
+  for unit in \
+    cloud-init.target \
     sshd.service \
     qemu-guest-agent.service; do
-    [ -L "$wants/$service" ]
-    [ "$(readlink "$wants/$service")" = "/usr/lib/systemd/system/$service" ]
+    [ -L "$wants/$unit" ]
+    [ "$(readlink "$wants/$unit")" = "/usr/lib/systemd/system/$unit" ]
   done
+  [ ! -e "$wants/cloud-init.service" ]
 
   run stage_official_tree desktop "$live" "$calamares" "$repo" "$staged"
   [ "$status" -eq 0 ]
-  for service in \
-    cloud-init-local.service \
-    cloud-init.service \
-    cloud-config.service \
-    cloud-final.service \
+  for unit in \
+    cloud-init.target \
     sshd.service \
     qemu-guest-agent.service; do
-    [ -L "$wants/$service" ]
-    [ "$(readlink "$wants/$service")" = "/usr/lib/systemd/system/$service" ]
+    [ -L "$wants/$unit" ]
+    [ "$(readlink "$wants/$unit")" = "/usr/lib/systemd/system/$unit" ]
   done
+  [ ! -e "$wants/cloud-init.service" ]
 
   export OFFICIAL_INVOCATION_LOG="$invocation"
   export OFFICIAL_USER_LOG="$official_user"
@@ -710,7 +727,13 @@ EOF
 @test "container entrypoint never bypasses official buildiso with direct mkarchiso" {
   f="$TEST_ROOT/distros/cachyos/container/build-edition.sh"
   grep -Eq '(^|[[:space:]])\\./buildiso\\.sh|/buildiso\\.sh' "$f"
-  ! grep -Eq 'sudo[[:space:]]+mkarchiso|(^|[[:space:]])mkarchiso[[:space:]]' "$f"
+  # Only a real invocation counts as a bypass. The script patches the contents of
+  # /usr/bin/mkarchiso so the official buildiso.sh run also performs our
+  # post-pacstrap tasks; naming mkarchiso in a comment, a string, or a variable
+  # is not a bypass. Comment lines are therefore excluded and the match is
+  # anchored to command position.
+  run bash -c "grep -vE '^[[:space:]]*#' '$f' | grep -nE '^[[:space:]]*(sudo[[:space:]]+)?mkarchiso([[:space:]]|\$)'"
+  [ "$status" -ne 0 ]
 }
 
 @test "artifact validation accepts a complete edition and rejects identity drift" {

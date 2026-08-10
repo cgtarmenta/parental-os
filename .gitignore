@@ -26,3 +26,6 @@ distros/ubuntu/chroot/
 distros/ubuntu/binary/
 distros/ubuntu/.build/
 distros/cachyos/work/
+
+__pycache__/
+*.pyc
