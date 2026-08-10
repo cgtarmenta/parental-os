@@ -223,17 +223,18 @@ reachable.
 
 ## Next steps
 
+Booting and installing need no manual disk handling. `just qemu-browser
+cachyos-desktop` regenerates the cloud-init seed and starts everything;
+`distros/qemu-browser/entrypoint.sh` passes `-boot d`, so the VM always boots the
+live ISO from CD-ROM and never the installed system, and Calamares reformats the
+target during the partition step anyway. The `browser.qcow2` file does persist
+between runs (the entrypoint only creates it when absent), but its contents do not
+affect either step below.
+
 1. Boot the rebuilt ISO and verify SSH into the live environment works. That is
-   the end-to-end proof of cause 3, and the prerequisite for everything else. The
-   state of `browser.qcow2` does not matter for this step — SSH lands in the live
-   environment, which does not care what the target disk holds.
+   the end-to-end proof of cause 3, and the prerequisite for everything else.
 2. Run a Calamares install and confirm the target has `parental-guard`, the
-   sudoers policy, and the polkit rules. **This step needs a clean disk.**
-   `out/qemu/browser/cachyos-desktop/browser.qcow2` is root-owned and still
-   carries a previous install, so move it aside first:
-   `sudo mv out/qemu/browser/cachyos-desktop/browser.qcow2{,.pre-fix-backup}`
-   The QEMU entrypoint recreates a fresh disk when the file is absent. If anything
-   fails, read
+   sudoers policy, and the polkit rules. If anything fails, read
    `/var/log/calamares/session.log` rather than hypothesising — that log going
    unread across eleven fix attempts is the single biggest reason this took as
    long as it did.
