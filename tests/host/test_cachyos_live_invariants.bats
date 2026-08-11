@@ -18,7 +18,9 @@ setup() {
   export DOCKER_CONTEXT="${DOCKER_CONTEXT:-default}"
   BUILD_EDITION="$TEST_ROOT/distros/cachyos/container/build-edition.sh"
   TRANSFORMER="$TEST_ROOT/distros/cachyos/calamares/apply-parental-overlay.py"
-  BUILT_AIROOTFS="$TEST_ROOT/out/cachyos/staging/desktop/profile-work/build/x86_64/airootfs"
+  # Overridable so these cases can be pointed at a build produced elsewhere, e.g.
+  # from another git worktree, which has no out/ of its own.
+  BUILT_AIROOTFS="${PARENTAL_OS_BUILT_AIROOTFS:-$TEST_ROOT/out/cachyos/staging/desktop/profile-work/build/x86_64/airootfs}"
 }
 
 teardown() {
@@ -210,4 +212,64 @@ EOF
   server="$(awk '/^\[parental-os\]/{i=1;next} i&&/^\[/{i=0} i&&/^Server/{print;exit}' \
     "$BUILT_AIROOTFS/etc/pacman-more.conf")"
   [[ "$server" == *"file:///srv/parental-os-repo"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# cloud-init has to actually configure the live system, not merely have its units
+# present.
+#
+# Three attempts at this failed in a row, each because the check verified the shape
+# of the fix instead of the requirement:
+#   - cloud-init.service was symlinked; the unit no longer exists (dangling).
+#   - cloud-init.target was symlinked; it ships no .wants and is ordered
+#     After=multi-user.target, so it pulls nothing.
+#   - the four stage units were symlinked; under cloud-init >= 24.3's single-process
+#     model they are only `nc -U` shims to sockets that cloud-init-main.service
+#     creates, so with main disabled every shim connects to nothing, the `| sh`
+#     receives nothing, and each oneshot reports success while configuring nothing.
+#
+# The assertion below is therefore derived from the image rather than from the fix:
+# it reads which enabled stage units are socket shims and which unit provides those
+# sockets, so it keeps holding if upstream changes the model again.
+# ---------------------------------------------------------------------------
+
+@test "built airootfs: enabled cloud-init shims have their socket provider enabled" {
+  [ -d "$BUILT_AIROOTFS" ] || skip "no built airootfs; run a CachyOS build first"
+  wants="$BUILT_AIROOTFS/etc/systemd/system/multi-user.target.wants"
+  units="$BUILT_AIROOTFS/usr/lib/systemd/system"
+
+  shims=""
+  for link in "$wants"/cloud-init*.service "$wants"/cloud-config.service \
+              "$wants"/cloud-final.service; do
+    [ -L "$link" ] || continue
+    unit="$(basename "$link")"
+    if grep -qE '/run/cloud-init/.*\.sock' "$units/$unit" 2>/dev/null; then
+      shims="$shims $unit"
+    fi
+  done
+  [ -n "$shims" ] || skip "this cloud-init version uses no socket shims"
+
+  # Whichever unit drives every stage in one process is what creates the sockets.
+  provider="$(grep -lE 'ExecStart=.*cloud-init .*--all-stages' \
+    "$units"/cloud-init*.service 2>/dev/null | head -1)"
+  [ -n "$provider" ]
+  provider="$(basename "$provider")"
+
+  if [ ! -L "$wants/$provider" ]; then
+    echo "socket shims enabled:$shims"
+    echo "but their socket provider $provider is NOT enabled"
+    echo "=> cloud-init will report success while configuring nothing"
+    false
+  fi
+}
+
+@test "build-edition enables the cloud-init single-process driver" {
+  units="$(sed -n '/for unit in \\/,/^  done$/p' "$BUILD_EDITION")"
+  [[ "$units" == *"cloud-init-main.service"* ]]
+}
+
+@test "post-pacstrap hook asserts the socket provider is enabled" {
+  hook="$(sed -n '/parental-os: the enablement symlinks/,/^)/p' "$BUILD_EDITION")"
+  [ -n "$hook" ]
+  [[ "$hook" == *"all-stages"* ]]
 }
