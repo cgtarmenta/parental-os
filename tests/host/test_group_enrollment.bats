@@ -146,6 +146,20 @@ EOF
   grep -qE '^WantedBy=multi-user.target' "$unit"
 }
 
+@test "the enrollment oneshot does not linger active, or the path trigger is dead" {
+  # systemd refuses to start an already-active unit, so RemainAfterExit=yes on a
+  # oneshot turns parental-guard-enroll.path into a permanent no-op after the first
+  # run. Observed on a live boot: the service ran once at 11:02 reporting "0 newly
+  # enrolled" because no interactive account existed yet, cloud-init created accounts
+  # at 11:04, /etc/passwd changed, and the trigger fired against a unit systemd
+  # considered already running. NRestarts stayed 0 and cloud-init's user was left out
+  # of parental-users.
+  unit="$SRC/usr/lib/systemd/system/parental-guard-enroll.service"
+  [ -f "$unit" ]
+  run grep -E '^RemainAfterExit=(yes|true|1)' "$unit"
+  [ "$status" -ne 0 ]
+}
+
 @test "enrollment re-runs when accounts are created later" {
   # The spec calls for automatic policy inheritance for new users. A login hook
   # cannot deliver that: it is shell-dependent and unprivileged. Watch the account

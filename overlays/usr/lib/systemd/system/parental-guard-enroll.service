@@ -8,7 +8,14 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-RemainAfterExit=yes
+# Deliberately NOT RemainAfterExit=yes. systemd will not start a unit that is
+# already active, so a lingering "active (exited)" oneshot makes
+# parental-guard-enroll.path a permanent no-op after its first run: the boot-time
+# pass sees no interactive accounts yet, cloud-init or the installer creates them
+# minutes later, /etc/passwd changes, and the trigger fires against a unit systemd
+# considers already running. Observed exactly that way on a live boot -- the service
+# ran once with "0 newly enrolled" and never again, leaving the account cloud-init
+# had created outside parental-users.
 EnvironmentFile=-/etc/parental-os/config.env
 ExecStart=/usr/lib/parental-os/enroll-users.sh
 
