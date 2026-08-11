@@ -1,0 +1,23 @@
+[Unit]
+Description=parental-os interactive user enrollment
+Documentation=man:usermod(8)
+# Must be settled before anyone can log in, otherwise a session starts under a
+# sudoers policy that does not yet apply to it.
+Before=systemd-user-sessions.service display-manager.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+# Deliberately NOT RemainAfterExit=yes. systemd will not start a unit that is
+# already active, so a lingering "active (exited)" oneshot makes
+# parental-guard-enroll.path a permanent no-op after its first run: the boot-time
+# pass sees no interactive accounts yet, cloud-init or the installer creates them
+# minutes later, /etc/passwd changes, and the trigger fires against a unit systemd
+# considers already running. Observed exactly that way on a live boot -- the service
+# ran once with "0 newly enrolled" and never again, leaving the account cloud-init
+# had created outside parental-users.
+EnvironmentFile=-/etc/parental-os/config.env
+ExecStart=/usr/lib/parental-os/enroll-users.sh
+
+[Install]
+WantedBy=multi-user.target

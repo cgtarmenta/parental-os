@@ -205,7 +205,14 @@ stage_official_tree() {
   # patch_mkarchiso_post_pacstrap asserts every one of these resolves once the
   # packages are actually installed, so a future rename fails the build instead of
   # silently costing us VM access again.
+  # cloud-init-main.service is not optional. From 24.3 cloud-init runs as a single
+  # process: the four stage units are only `nc -U` shims that poke sockets under
+  # /run/cloud-init/share/, and main (ExecStart=/usr/bin/cloud-init --all-stages) is
+  # the sole creator of those sockets. With main disabled every shim connects to
+  # nothing, its `| sh` receives nothing, and each oneshot reports success while
+  # cloud-init configures nothing at all -- no users, no SSH, no install log.
   for unit in \
+    cloud-init-main.service \
     cloud-init-local.service \
     cloud-init-network.service \
     cloud-config.service \
@@ -311,14 +318,45 @@ insert = (
     '        # 24.3) otherwise leaves a dangling symlink that costs SSH access to the\n'
     '        # live VM, and with it any ability to read the Calamares install log.\n'
     '        for _parental_unit in \\\n'
-    '          cloud-init-local.service cloud-init-network.service \\\n'
-    '          cloud-config.service cloud-final.service cloud-init.target \\\n'
+    '          cloud-init-main.service cloud-init-local.service \\\n'
+    '          cloud-init-network.service cloud-config.service \\\n'
+    '          cloud-final.service cloud-init.target \\\n'
     '          sshd.service qemu-guest-agent.service; do\n'
     '          if [[ ! -e "${pacstrap_dir}/usr/lib/systemd/system/${_parental_unit}" ]]; then\n'
     '            printf "parental-os: FATAL: unit %s is not present in the image; its multi-user.target.wants symlink would dangle\\n" "$_parental_unit" >&2\n'
     '            exit 1\n'
     '          fi\n'
     '        done\n'
+    '        # parental-os: a unit existing is not the same as cloud-init working.\n'
+    '        # The stage units are socket shims; whichever unit runs cloud-init with\n'
+    '        # --all-stages is what creates the sockets they poke. If those shims are\n'
+    '        # enabled without their provider, every one of them reports success while\n'
+    '        # configuring nothing. Derive the relationship from the image so this\n'
+    '        # keeps holding if upstream changes the model again.\n'
+    '        _parental_units_dir="${pacstrap_dir}/usr/lib/systemd/system"\n'
+    '        _parental_wants="${pacstrap_dir}/etc/systemd/system/multi-user.target.wants"\n'
+    '        _parental_shims=""\n'
+    '        for _parental_link in "$_parental_wants"/cloud-init*.service \\\n'
+    '                              "$_parental_wants"/cloud-config.service \\\n'
+    '                              "$_parental_wants"/cloud-final.service; do\n'
+    '          [[ -L "$_parental_link" ]] || continue\n'
+    '          _parental_u="$(basename "$_parental_link")"\n'
+    '          if grep -qE "/run/cloud-init/.*[.]sock" "$_parental_units_dir/$_parental_u" 2>/dev/null; then\n'
+    '            _parental_shims="$_parental_shims $_parental_u"\n'
+    '          fi\n'
+    '        done\n'
+    '        if [[ -n "$_parental_shims" ]]; then\n'
+    '          _parental_provider="$(grep -lE "ExecStart=.*cloud-init .*--all-stages" "$_parental_units_dir"/cloud-init*.service 2>/dev/null | head -1)"\n'
+    '          if [[ -z "$_parental_provider" ]]; then\n'
+    '            printf "parental-os: FATAL: cloud-init stage shims present but no --all-stages driver found; upstream model changed\\n" >&2\n'
+    '            exit 1\n'
+    '          fi\n'
+    '          _parental_provider="$(basename "$_parental_provider")"\n'
+    '          if [[ ! -L "$_parental_wants/$_parental_provider" ]]; then\n'
+    '            printf "parental-os: FATAL: cloud-init shims%s are enabled but their socket provider %s is not; cloud-init would silently configure nothing\\n" "$_parental_shims" "$_parental_provider" >&2\n'
+    '            exit 1\n'
+    '          fi\n'
+    '        fi\n'
 )
 last_idx = content.rfind(marker)
 if last_idx == -1:

@@ -14,25 +14,68 @@ fi
 GROUP_NAME="${PARENTAL_OS_GROUP:-parental-users}"
 cmd="${1:-status}"
 
+ENROLL="/usr/lib/parental-os/enroll-users.sh"
+
+# Report membership, because a group that exists but contains nobody means the
+# sudoers policy applies to no one. Status previously reported OK in exactly that
+# state, which let a completely unenforced install look healthy.
+enrollment_report() {
+  local enroll="$ENROLL" unenrolled enrolled
+  [[ -n "$ROOT_FS" ]] && enroll="$ROOT_FS$ENROLL"
+  if [[ ! -x "$enroll" ]]; then
+    # Fall back to the in-tree copy so dev/overlay mode still reports something.
+    enroll="$(dirname "$(readlink -f "$0")")/../lib/parental-os/enroll-users.sh"
+    [[ -x "$enroll" ]] || { echo "enrolled: unknown (enroll-users.sh missing)"; return 1; }
+  fi
+  enrolled="$("$enroll" --list 2>/dev/null | wc -l | tr -d ' ')"
+  echo "interactive_users: ${enrolled}"
+  if [[ "$enrolled" -eq 0 ]]; then
+    # A staged overlay tree, or a system with no interactive accounts yet. Nothing
+    # to enroll is not the same as failing to enroll.
+    echo "enrolled: not_applicable"
+    return 0
+  fi
+  if unenrolled="$("$enroll" --check 2>&1 >/dev/null)"; then
+    echo "enrolled: all"
+    return 0
+  fi
+  echo "enrolled: incomplete"
+  printf '%s\n' "$unenrolled" | sed -n 's/^  /unenrolled: /p'
+  return 1
+}
+
 status_cmd() {
+  local ok=0
   echo "parental-os status"
   echo "group: ${GROUP_NAME}"
   if [[ -n "$ROOT_FS" ]]; then
     echo "rootfs: $ROOT_FS (overlay/dev mode)"
-    echo "result: OK"
-    return 0
+    enrollment_report || ok=1
+    if [[ "$ok" -eq 0 ]]; then
+      echo "result: OK"
+      return 0
+    fi
+    echo "result: DEGRADED"
+    return 1
   fi
   if getent group "$GROUP_NAME" >/dev/null 2>&1; then
     echo "group_exists: yes"
   else
     echo "group_exists: no"
+    ok=1
   fi
   if systemctl is-active --quiet parental-guard-agent.service 2>/dev/null; then
     echo "agent: active"
   else
     echo "agent: inactive_or_unavailable"
   fi
-  echo "result: OK"
+  enrollment_report || ok=1
+  if [[ "$ok" -eq 0 ]]; then
+    echo "result: OK"
+    return 0
+  fi
+  echo "result: DEGRADED"
+  return 1
 }
 
 doctor_cmd() {
