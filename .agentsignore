@@ -1,0 +1,157 @@
+# =============================================================================
+# .agentsignore  —  parental-os
+# =============================================================================
+# Mantiene a los agentes de codificación (Codex, Cursor, Claude, etc.) fuera
+# del contenido del repo que no aporta a la tarea y solo quema tokens:
+# arboles de build completos, worktrees, chroots, binarios, logs y caches.
+#
+# Sintaxis identica a .gitignore.
+#   - Un patron que empieza con barra (/) se ancla a la raiz del repo.
+#   - ** cruza cualquier numero de directorios.
+#   - Un patron que termina en barra (/) solo aplica a directorios.
+#
+# Queda accesible a proposito (fuente de la verdad):
+#   Justfile, compose.qemu.yml, .gitignore
+#   docs/                 (incluido docs/superpowers/ plans/specs/handoffs)
+#   overlays/             (config y scripts raiz del OS)
+#   packages/             (PKGBUILD, debian/ — no su build)
+#   scripts/ y scripts/lib/
+#   tests/
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 0. Lo mas caro: worktrees de git y arboles raiz completos de Linux.
+#    .worktrees/ y out/ contienen raices generadas por live-build (Ubuntu) y
+#    archiso (CachyOS): miles de archivos bajo etc/ var/ usr/ root/ ...
+# -----------------------------------------------------------------------------
+/.worktrees/
+/out/
+**/out/
+
+# Sub-arboles tipicos de archiso / live-build (en cualquier worktree o build):
+**/airootfs/
+**/chroot/
+**/bootstrap/
+**/profile-work/
+
+# -----------------------------------------------------------------------------
+# 1. Directorios de salida / build / cache (en cualquier nivel)
+# -----------------------------------------------------------------------------
+build/
+work/
+.build/
+.cache/
+dist/
+artifacts/
+_output/
+
+# Build especifico por distro:
+distros/**/cache/
+distros/**/binary/
+distros/**/.build/
+distros/**/work/
+
+# -----------------------------------------------------------------------------
+# 2. Artefactos binarios, imagenes y paquetes generados
+# -----------------------------------------------------------------------------
+*.iso
+*.img
+*.raw
+*.qcow2
+*.vdi
+*.vmdk
+*.vhd
+*.deb
+*.ddeb
+*.rpm
+*.pkg.tar.*
+*.tar
+*.tar.gz
+*.tar.xz
+*.tar.zst
+*.zip
+*.7z
+*.squashfs
+*.vmlinuz
+*.initrd
+*.efi
+*.ko
+*.o
+*.a
+
+# -----------------------------------------------------------------------------
+# 3. Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.tox/
+
+# -----------------------------------------------------------------------------
+# 4. Node / JS / TS  (por si entra tooling auxiliar)
+# -----------------------------------------------------------------------------
+node_modules/
+.next/
+.nuxt/
+.parcel-cache/
+.turbo/
+*.min.js
+*.min.css
+*.js.map
+*.css.map
+
+# -----------------------------------------------------------------------------
+# 5. Lockfiles  (generados, pesados, bajo valor para razonar)
+# -----------------------------------------------------------------------------
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+Pipfile.lock
+poetry.lock
+Cargo.lock
+go.sum
+
+# -----------------------------------------------------------------------------
+# 6. Logs, volcados y temporales
+# -----------------------------------------------------------------------------
+*.log
+logs/
+*.pid
+*.seed
+*.tmp
+*.swp
+*.swo
+*~
+
+# -----------------------------------------------------------------------------
+# 7. Basura de SO y editores / IDE
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.code-workspace
+.fleet/
+.history/
+
+# -----------------------------------------------------------------------------
+# 8. Build local de paquetes (Arch + Debian) — generado, no fuente.
+#    La fuente de la verdad es overlays/; packages/*/src/ se sincroniza desde
+#    ahi con scripts/sync-package-from-overlays.sh.
+# -----------------------------------------------------------------------------
+srcpkgs/
+pkg/
+packages/*/arch/pkg/
+packages/*/arch/src/
+packages/*/src/
+packages/*/debian/*.debhelper*
+packages/*/debian/.debhelper/
+packages/*/debian/files
