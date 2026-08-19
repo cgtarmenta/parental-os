@@ -61,17 +61,30 @@ ssh -p 2222 -i out/qemu/id_ed25519 -o StrictHostKeyChecking=no \
 
 Expected: `CONNECTED` within ~4 minutes of boot.
 
-- [ ] **Step 2: Confirm `autoProceed` is actually parsed by the shipped binary**
+- [ ] **Step 2: Confirm `autoProceed` is actually parsed by the shipped package**
+
+`Settings.cpp` compiles into `libcalamares.so`, **not** into the `calamares` executable, so grepping the binary is a false negative — it returns nothing even when the feature is present. Grep the library and the installed header:
 
 ```bash
 ssh -p 2222 -i out/qemu/id_ed25519 -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null child@127.0.0.1 \
-  'strings /usr/bin/calamares | grep -x autoProceed'
+  'strings /usr/lib/libcalamares.so* | grep -x autoProceed; \
+   grep -n autoProceed /usr/include/libcalamares/Settings.h; \
+   pacman -Qi cachyos-calamares-next | head -2'
 ```
 
-Expected: `autoProceed`.
+Expected: `autoProceed` from the library, plus a header line like
+`bool autoProceed() const { return m_autoProceed; }`. The header matters beyond
+presence: the accessor sits beside `isCustom()` and `weight()` on the per-instance
+descriptor, which is what confirms `autoProceed` belongs on an `instances:` entry
+rather than at the top level.
 
-If it is absent, the installed `cachyos-calamares-next` package predates the flag. Stop and report: the plan's mechanism does not exist in the shipped binary and Task 1 has failed. Do not proceed to Task 2.
+**Measured on 2026-08-11 against `cachyos-calamares-next 3.4.2-11`: present.** See
+`docs/superpowers/notes/2026-08-11-autoproceed-spike.md`.
+
+If it is absent from the library *and* the header, the installed package predates the
+flag. Stop and report: the plan's mechanism does not exist in the shipped package and
+Task 1 has failed. Do not proceed to Task 2.
 
 - [ ] **Step 3: Confirm Calamares starts headless**
 
