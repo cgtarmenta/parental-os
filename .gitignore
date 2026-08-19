@@ -29,3 +29,6 @@ distros/cachyos/work/
 
 __pycache__/
 *.pyc
+
+# HP printer diagnostic log (not project-related)
+hp-check.log
