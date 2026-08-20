@@ -73,3 +73,20 @@ setup() {
   # It must be reachable only via calamares -c, never from the installed config.
   ! grep -rq 'unattended' "$TEST_ROOT/distros/cachyos/calamares/apply-parental-overlay.py"
 }
+
+
+@test "seed builder accepts a profile and defaults to smoke" {
+  s="$TEST_ROOT/scripts/make-cloud-init-seed.sh"
+  grep -q -- '--profile' "$s"
+  grep -q 'user-data-install' "$s"
+  grep -qE 'PROFILE="${PROFILE:-smoke}"|PROFILE=smoke' "$s"
+}
+
+@test "install seed launches calamares against the shipped unattended tree" {
+  d="$TEST_ROOT/tests/qemu/user-data-install"
+  [ -f "$d" ]
+  grep -q '/usr/share/parental-os/unattended' "$d"
+  grep -q 'calamares' "$d"
+  # The Qt platform must be pinned; a GUI-only launch has no display in this path.
+  grep -q 'QT_QPA_PLATFORM' "$d"
+}

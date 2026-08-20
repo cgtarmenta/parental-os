@@ -1,0 +1,34 @@
+#cloud-config
+package_update: false
+ssh_pwauth: false
+disable_root: true
+write_files:
+  - path: /usr/local/sbin/parental-os-run-install
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      # Drive an unattended Calamares install, then let finished.conf power off.
+      # A clean poweroff is the success signal; a machine still running when the
+      # driver's timeout expires is the failure signal.
+      set -uo pipefail
+      exec >>/var/log/parental-os-install.log 2>&1
+      echo "=== parental-os unattended install starting: $(date -u) ==="
+      tree=/usr/share/parental-os/unattended
+      if [[ ! -f "$tree/settings.conf" ]]; then
+        echo "FATAL: unattended tree missing at $tree"
+        exit 1
+      fi
+      # QT_QPA_PLATFORM=offscreen is the headless Qt platform the Task 1 spike
+      # (docs/superpowers/notes/2026-08-11-autoproceed-spike.md) verified reaches
+      # a fully initialised CalamaresWindow with all requirements satisfied, no
+      # display required. calamares -c takes a configuration DIRECTORY, so it
+      # points at the shipped unattended tree. Runs as root via systemd-run.
+      export QT_QPA_PLATFORM=offscreen
+      calamares -c "$tree" -D6
+      rc=$?
+      echo "=== calamares exited rc=$rc: $(date -u) ==="
+      exit "$rc"
+runcmd:
+  - [ systemd-run, --unit=parental-os-install, --description=unattended install,
+      /usr/local/sbin/parental-os-run-install ]

@@ -55,7 +55,21 @@ PUB_TMP=""
 PUB="$(<"$KEY.pub")"
 rm -rf "$SEED_DIR"
 mkdir -p "$SEED_DIR"
-USER_DATA="$(<"$ROOT/tests/qemu/user-data")"
+PROFILE="${PROFILE:-smoke}"
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --profile) PROFILE="${2:?--profile needs a value}"; shift 2 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+case "$PROFILE" in
+  smoke)   template="$ROOT/tests/qemu/user-data" ;;
+  install) template="$ROOT/tests/qemu/user-data-install" ;;
+  *) die "unknown seed profile: $PROFILE (use smoke|install)" ;;
+esac
+[[ -f "$template" ]] || die "seed template not found: $template"
+USER_DATA="$(<"$template")"
+log "seed profile: $PROFILE"
 printf '%s\n' "${USER_DATA//SSH_PUBKEY_PLACEHOLDER/$PUB}" >"$SEED_DIR/user-data"
 cp "$ROOT/tests/qemu/meta-data" "$SEED_DIR/meta-data"
 
