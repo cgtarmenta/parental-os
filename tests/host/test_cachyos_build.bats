@@ -1356,3 +1356,9 @@ skip_if_no_docker() {
     --entrypoint /usr/bin/pacman parental-os-cachyos-builder:test -Qi archiso
   [ "$status" -eq 0 ]
 }
+
+@test "official staging ships the unattended Calamares tree into the airootfs" {
+  f="$TEST_ROOT/distros/cachyos/container/build-edition.sh"
+  grep -q 'unattended' "$f"
+  grep -q 'usr/share/parental-os/unattended' "$f"
+}

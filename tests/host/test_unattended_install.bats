@@ -73,3 +73,69 @@ setup() {
   # It must be reachable only via calamares -c, never from the installed config.
   ! grep -rq 'unattended' "$TEST_ROOT/distros/cachyos/calamares/apply-parental-overlay.py"
 }
+
+
+@test "seed builder accepts a profile and defaults to smoke" {
+  s="$TEST_ROOT/scripts/make-cloud-init-seed.sh"
+  grep -q -- '--profile' "$s"
+  grep -q 'user-data-install' "$s"
+  grep -qE 'PROFILE="${PROFILE:-smoke}"|PROFILE=smoke' "$s"
+}
+
+@test "install seed launches calamares against the shipped unattended tree" {
+  d="$TEST_ROOT/tests/qemu/user-data-install"
+  [ -f "$d" ]
+  grep -q '/usr/share/parental-os/unattended' "$d"
+  grep -q 'calamares' "$d"
+  # The Qt platform must be pinned; a GUI-only launch has no display in this path.
+  grep -q 'QT_QPA_PLATFORM' "$d"
+}
+
+
+@test "test-install.sh exists, is executable and pins the docker context" {
+  s="$TEST_ROOT/scripts/test-install.sh"
+  [ -f "$s" ]
+  [ -x "$s" ]
+  bash -n "$s"
+  grep -q 'DOCKER_CONTEXT' "$s"
+}
+
+@test "test-install.sh treats a clean poweroff as success and a timeout as failure" {
+  s="$TEST_ROOT/scripts/test-install.sh"
+  grep -qE "poweroff|exited" "$s"
+  grep -qE 'INSTALL_TIMEOUT|timeout' "$s"
+}
+
+@test "test-install.sh boots the installed disk after the install" {
+  s="$TEST_ROOT/scripts/test-install.sh"
+  grep -qE "boot_installed|BOOT_ORDER|installed" "$s"
+}
+
+@test "Justfile exposes test-install" {
+  grep -qE '^test-install' "$TEST_ROOT/Justfile"
+}
+
+
+# ---------------------------------------------------------------------------
+# Task 6: the installed-target verifier exists and records what it must.
+# ---------------------------------------------------------------------------
+
+@test "assert_target.sh exists, is executable and valid bash" {
+  s="$TEST_ROOT/tests/qemu/assert_target.sh"
+  [ -f "$s" ]
+  [ -x "$s" ]
+  bash -n "$s"
+}
+
+@test "assert_target.sh records the three known bypasses as expected-today" {
+  s="$TEST_ROOT/tests/qemu/assert_target.sh"
+  grep -q 'wheel' "$s"          # users.conf defaultGroups
+  grep -q 'pkexec' "$s"         # polkit admin identity
+  grep -q -i 'snapshot' "$s"    # bootable snapshot entries
+}
+
+@test "assert_target.sh checks the enrollment path on the installed target" {
+  s="$TEST_ROOT/tests/qemu/assert_target.sh"
+  grep -q 'parental-users' "$s"
+  grep -q 'parental-guard' "$s"
+}

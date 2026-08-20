@@ -35,3 +35,7 @@ qemu-browser-down:
 clean:
   rm -rf "{{root}}/out"/*
   mkdir -p "{{root}}/out/ubuntu" "{{root}}/out/cachyos" "{{root}}/out/packages" "{{root}}/out/logs" "{{root}}/out/qemu"
+
+
+test-install target="cachyos-desktop":
+  "{{root}}/scripts/test-install.sh" "{{target}}"
