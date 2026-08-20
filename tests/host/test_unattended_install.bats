@@ -114,3 +114,28 @@ setup() {
 @test "Justfile exposes test-install" {
   grep -qE '^test-install' "$TEST_ROOT/Justfile"
 }
+
+
+# ---------------------------------------------------------------------------
+# Task 6: the installed-target verifier exists and records what it must.
+# ---------------------------------------------------------------------------
+
+@test "assert_target.sh exists, is executable and valid bash" {
+  s="$TEST_ROOT/tests/qemu/assert_target.sh"
+  [ -f "$s" ]
+  [ -x "$s" ]
+  bash -n "$s"
+}
+
+@test "assert_target.sh records the three known bypasses as expected-today" {
+  s="$TEST_ROOT/tests/qemu/assert_target.sh"
+  grep -q 'wheel' "$s"          # users.conf defaultGroups
+  grep -q 'pkexec' "$s"         # polkit admin identity
+  grep -q -i 'snapshot' "$s"    # bootable snapshot entries
+}
+
+@test "assert_target.sh checks the enrollment path on the installed target" {
+  s="$TEST_ROOT/tests/qemu/assert_target.sh"
+  grep -q 'parental-users' "$s"
+  grep -q 'parental-guard' "$s"
+}
