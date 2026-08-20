@@ -262,6 +262,19 @@ stage_official_tree() {
   mkdir -p "$staged_dir/archiso/airootfs/usr/share/calamares"
   cp -a "$calamares_dir/src" "$staged_dir/archiso/airootfs/usr/share/calamares/src"
 
+  # Ship the unattended Calamares config tree for automated target-install tests.
+  # Consumed only via `calamares -c`; never wired into a shipping settings file.
+  # These are config files, not executables, so archiso's default 0644 restore is
+  # the desired mode and no file_permissions entry is needed.
+  local unattended_src="$REPO_DIR/distros/cachyos/calamares/unattended"
+  if [[ -d "$unattended_src" ]]; then
+    mkdir -p "$staged_dir/archiso/airootfs/usr/share/parental-os/unattended"
+    cp -a "$unattended_src/." "$staged_dir/archiso/airootfs/usr/share/parental-os/unattended/"
+    log "stage_official_tree: shipped unattended Calamares tree"
+  else
+    die "unattended Calamares tree not found at $unattended_src"
+  fi
+
 }
 
 # Patch mkarchiso to run post-pacstrap tasks: copy Calamares module .conf files,
