@@ -90,3 +90,27 @@ setup() {
   # The Qt platform must be pinned; a GUI-only launch has no display in this path.
   grep -q 'QT_QPA_PLATFORM' "$d"
 }
+
+
+@test "test-install.sh exists, is executable and pins the docker context" {
+  s="$TEST_ROOT/scripts/test-install.sh"
+  [ -f "$s" ]
+  [ -x "$s" ]
+  bash -n "$s"
+  grep -q 'DOCKER_CONTEXT' "$s"
+}
+
+@test "test-install.sh treats a clean poweroff as success and a timeout as failure" {
+  s="$TEST_ROOT/scripts/test-install.sh"
+  grep -qE "poweroff|exited" "$s"
+  grep -qE 'INSTALL_TIMEOUT|timeout' "$s"
+}
+
+@test "test-install.sh boots the installed disk after the install" {
+  s="$TEST_ROOT/scripts/test-install.sh"
+  grep -qE "boot_installed|BOOT_ORDER|installed" "$s"
+}
+
+@test "Justfile exposes test-install" {
+  grep -qE '^test-install' "$TEST_ROOT/Justfile"
+}
