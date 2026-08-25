@@ -122,6 +122,8 @@ fetch_and_checkout() {
     git clone "$live_iso_url" "$stage_dir/cachyos-live-iso" 2>/dev/null
   fi
   git -C "$stage_dir/cachyos-live-iso" fetch origin 2>/dev/null || true
+  git -C "$stage_dir/cachyos-live-iso" reset --hard 2>/dev/null || true
+  git -C "$stage_dir/cachyos-live-iso" clean -fdx 2>/dev/null || true
   git -C "$stage_dir/cachyos-live-iso" checkout --detach "$live_iso_sha" 2>/dev/null \
     || die "failed to checkout Live ISO SHA $live_iso_sha"
   local checked
@@ -134,10 +136,10 @@ fetch_and_checkout() {
     git clone "$calamares_url" "$stage_dir/cachyos-calamares" 2>/dev/null
   fi
   git -C "$stage_dir/cachyos-calamares" fetch origin 2>/dev/null || true
+  git -C "$stage_dir/cachyos-calamares" reset --hard 2>/dev/null || true
+  git -C "$stage_dir/cachyos-calamares" clean -fdx 2>/dev/null || true
   git -C "$stage_dir/cachyos-calamares" checkout --detach "$calamares_sha" 2>/dev/null \
     || die "failed to checkout Calamares SHA $calamares_sha"
-  git -C "$stage_dir/cachyos-calamares" clean -fdx 2>/dev/null || true
-  git -C "$stage_dir/cachyos-calamares" checkout -- . 2>/dev/null || true
   checked="$(git -C "$stage_dir/cachyos-calamares" rev-parse HEAD)"
   [[ "$checked" = "$calamares_sha" ]] \
     || die "Calamares checkout SHA mismatch: expected=$calamares_sha got=$checked"
@@ -147,6 +149,8 @@ fetch_and_checkout() {
     git clone "$pkgbuilds_url" "$stage_dir/cachyos-pkgbuilds" 2>/dev/null
   fi
   git -C "$stage_dir/cachyos-pkgbuilds" fetch origin 2>/dev/null || true
+  git -C "$stage_dir/cachyos-pkgbuilds" reset --hard 2>/dev/null || true
+  git -C "$stage_dir/cachyos-pkgbuilds" clean -fdx 2>/dev/null || true
   git -C "$stage_dir/cachyos-pkgbuilds" checkout --detach "$pkgbuilds_sha" 2>/dev/null \
     || die "failed to checkout PKGBUILDS SHA $pkgbuilds_sha"
   checked="$(git -C "$stage_dir/cachyos-pkgbuilds" rev-parse HEAD)"
