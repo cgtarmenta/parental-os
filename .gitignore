@@ -32,3 +32,6 @@ __pycache__/
 
 # HP printer diagnostic log (not project-related)
 hp-check.log
+
+# Superpowers scratch and ledgers
+.superpowers/
