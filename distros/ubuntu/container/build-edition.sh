@@ -405,26 +405,48 @@ UNIT_EOF
     find . -type f ! -path "./boot.catalog" ! -path "./isolinux/boot.cat" -exec md5sum {} + > md5sum.txt 2>/dev/null || true
   )
 
-  # Step 6: Rebuild bootable hybrid ISO with xorriso / grub-mkrescue
+  # Step 6: Extract official boot images and rebuild hybrid ISO with genuine MBR & EFI layout
+  local boot_images="$work_dir/boot_images"
+  mkdir -p "$boot_images"
+  xorriso -osirrox on -indev "$base_iso_path" -extract_boot_images "$boot_images" >/dev/null 2>&1 || true
+
   log "Generating bootable hybrid desktop ISO with xorriso..."
   (
     cd "$iso_extracted"
-    xorriso -as mkisofs \
-      -r -V "PARENTAL_OS_UBUNTU" \
-      -J -joliet-long -l -iso-level 3 \
-      -partition_offset 16 \
-      -b boot/grub/i386-pc/eltorito.img \
-      -c boot.catalog \
-      -no-emul-boot -boot-load-size 4 -boot-info-table \
-      --grub2-boot-info \
-      -eltorito-alt-boot \
-      -e EFI/boot/bootx64.efi \
-      -no-emul-boot -isohybrid-gpt-basdat \
-      -o "$iso_dest" . 2>/dev/null || \
-    xorriso -as mkisofs \
-      -r -V "PARENTAL_OS_UBUNTU" \
-      -o "$iso_dest" . 2>/dev/null || \
-    grub-mkrescue -o "$iso_dest" "$iso_extracted" -- -volid "PARENTAL_OS_UBUNTU" 2>/dev/null
+    if [[ -f "$boot_images/mbr_code_grub2.img" && -f "$boot_images/gpt_part2_efi.img" ]]; then
+      xorriso -as mkisofs \
+        -r -V "Ubuntu 26.04.1 LTS amd64" \
+        -J -joliet-long -l -iso-level 3 \
+        -partition_offset 16 \
+        --grub2-mbr "$boot_images/mbr_code_grub2.img" \
+        --protective-msdos-label \
+        -partition_cyl_align off \
+        --mbr-force-bootable \
+        -append_partition 2 28732ac11ff8d211ba4b00a0c93ec93b "$boot_images/gpt_part2_efi.img" \
+        -appended_part_as_gpt \
+        -iso_mbr_part_type a2a0d0ebe5b9334487c068b6b72699c7 \
+        -c '/boot.catalog' \
+        -b '/boot/grub/i386-pc/eltorito.img' \
+        -no-emul-boot -boot-load-size 4 -boot-info-table \
+        --grub2-boot-info \
+        -eltorito-alt-boot \
+        -e '--interval:appended_partition_2:all::' \
+        -no-emul-boot \
+        -o "$iso_dest" .
+    else
+      xorriso -as mkisofs \
+        -r -V "Ubuntu 26.04.1 LTS amd64" \
+        -J -joliet-long -l -iso-level 3 \
+        -partition_offset 16 \
+        -b boot/grub/i386-pc/eltorito.img \
+        -c boot.catalog \
+        -no-emul-boot -boot-load-size 4 -boot-info-table \
+        --grub2-boot-info \
+        -eltorito-alt-boot \
+        -e EFI/boot/bootx64.efi \
+        -no-emul-boot -isohybrid-gpt-basdat \
+        -o "$iso_dest" .
+    fi
   )
 
   log "Bootable genuine Ubuntu Desktop ISO generated at $iso_dest"
