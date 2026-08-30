@@ -430,6 +430,14 @@ run_official_build() {
   # Clean work chroot to free space
   rm -rf "$chroot_dir"
 
+  # Update GRUB configuration to point layerfs-path directly to unified filesystem.squashfs
+  log "Updating GRUB configuration with layerfs-path=filesystem.squashfs..."
+  for grub_file in "$iso_extracted/boot/grub/grub.cfg" "$iso_extracted/boot/grub/loopback.cfg"; do
+    if [[ -f "$grub_file" ]]; then
+      sed -i 's|/casper/vmlinuz\([ \t]\+\)|/casper/vmlinuz layerfs-path=filesystem.squashfs\1|g' "$grub_file"
+    fi
+  done
+
   # Recompute ISO md5sum manifest
   log "Recomputing ISO md5sum manifest..."
   (
