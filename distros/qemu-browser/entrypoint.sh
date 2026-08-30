@@ -53,7 +53,7 @@ QEMU_ARGS=(
   -cdrom "$PARENTAL_OS_ISO"
   -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22"
   -device virtio-net-pci,netdev=net0
-  -vga std
+  -vga virtio
   -display none
   -vnc 127.0.0.1:0
   -serial mon:stdio
