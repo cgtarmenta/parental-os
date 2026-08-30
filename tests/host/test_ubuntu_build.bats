@@ -58,6 +58,34 @@ _make_source_repo() {
   export FIRST_SHA SECOND_SHA
 }
 
+_copy_ubuntu_calamares_fixture() {
+  local destination="$1"
+  mkdir -p "$destination"
+  cp -a "$TEST_ROOT/tests/fixtures/ubuntu/calamares/." "$destination/"
+}
+
+_run_ubuntu_transformer_source() {
+  local source_root="$1"
+  local live_root="$2"
+  local package="${3:-}"
+  if [[ -n "$package" ]]; then
+    run python3 "$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py" \
+      stage "$source_root" "$live_root" \
+      "$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py" "$package"
+  else
+    run python3 "$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py" \
+      stage "$source_root" "$live_root" \
+      "$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py"
+  fi
+}
+
+_run_ubuntu_transformer_runtime() {
+  local source_root="$1"
+  local live_root="$2"
+  run python3 "$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py" \
+    runtime "$source_root" "$live_root"
+}
+
 # ---------------------------------------------------------------------------
 # Edition metadata
 # ---------------------------------------------------------------------------
@@ -396,4 +424,282 @@ skip_if_no_docker() {
     bash -c 'command -v debootstrap && command -v mksquashfs && command -v xorriso && command -v dpkg-buildpackage && command -v git && command -v jq && command -v python3'
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# Calamares parental overlay transformer for Ubuntu (Task 3)
+# ---------------------------------------------------------------------------
+
+@test "Ubuntu apply-parental-overlay.py exists and is executable" {
+  f="$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py"
+  [ -f "$f" ]
+  [ -x "$f" ]
+}
+
+@test "Ubuntu apply-parental-overlay.py has valid Python 3 syntax" {
+  f="$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py"
+  run python3 -m py_compile "$f"
+  [ "$status" -eq 0 ]
+}
+
+@test "Ubuntu apply-parental-overlay.py adds all four services to services-systemd.conf" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+
+  conf="$calamares/src/modules/services-systemd/services-systemd.conf"
+  [ -f "$conf" ]
+  for svc in parental-guard.service parental-guard-agent.service parental-guard-enroll.service parental-guard-enroll.path; do
+    grep -q "$svc" "$conf"
+  done
+  grep -A 2 'parental-guard.service' "$conf" | grep -q 'action: "enable"'
+  grep -A 2 'parental-guard.service' "$conf" | grep -q 'mandatory: true'
+}
+
+@test "Ubuntu apply-parental-overlay.py wires shellprocess repo copy and cleanup" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+
+  before_conf="$calamares/src/modules/shellprocess/shellprocess-before-online.conf"
+  cleanup_conf="$calamares/src/modules/shellprocess/shellprocess_cleanup_calamares.conf"
+  grep -q '/etc/calamares/scripts/copy-parental-os-repo ${ROOT}' "$before_conf"
+  grep -q '/etc/calamares/scripts/remove-parental-os-repo' "$cleanup_conf"
+}
+
+@test "Ubuntu apply-parental-overlay.py creates copy-parental-os-repo, install-parental-guard, and remove-parental-os-repo scripts" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+
+  [ -x "$calamares/scripts/copy-parental-os-repo" ]
+  [ -x "$calamares/scripts/install-parental-guard" ]
+  [ -x "$calamares/scripts/remove-parental-os-repo" ]
+}
+
+@test "Ubuntu apply-parental-overlay.py is idempotent" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+  first_hash="$(find "$calamares" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+  second_hash="$(find "$calamares" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
+  [ "$first_hash" = "$second_hash" ]
+}
+
+@test "Ubuntu apply-parental-overlay.py is fail-closed on missing inputs" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  rm -f "$calamares/src/modules/services-systemd/services-systemd.conf"
+  mkdir -p "$live/usr/local/bin"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -ne 0 ]
+}
+
+@test "Ubuntu copy-parental-os-repo copies local repo and sets up apt list" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  source_repo="$TEST_TMP/source-repo"
+  target="$TEST_TMP/target"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin" "$source_repo" "$target"
+  printf 'Package: parental-guard\n' >"$source_repo/Packages"
+  printf 'fake deb\n' >"$source_repo/parental-guard_0.1.0-1_all.deb"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+
+  PARENTAL_OS_REPO_SOURCE="$source_repo" run "$calamares/scripts/copy-parental-os-repo" "$target"
+  [ "$status" -eq 0 ]
+  [ -f "$target/srv/parental-os-repo/Packages" ]
+  [ -f "$target/srv/parental-os-repo/parental-guard_0.1.0-1_all.deb" ]
+  [ -f "$target/etc/apt/sources.list.d/parental-os.list" ]
+  grep -q 'file:///srv/parental-os-repo' "$target/etc/apt/sources.list.d/parental-os.list"
+}
+
+@test "Ubuntu install-parental-guard configures PAM account gate in common-account" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  target="$TEST_TMP/target"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin" "$target/srv/parental-os-repo" "$target/etc/pam.d" "$target/usr/bin"
+  printf 'fake deb\n' >"$target/srv/parental-os-repo/parental-guard_0.1.0-1_all.deb"
+  cat >"$target/etc/pam.d/common-account" <<'EOF'
+# /etc/pam.d/common-account - authorization settings common to all services
+account [success=1 new_authtok_reqd=done default=ignore] pam_unix.so
+account requisite pam_deny.so
+account required pam_permit.so
+EOF
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+
+  fake_bin="$TEST_TMP/fakebin"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/dpkg" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  cat >"$fake_bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  cat >"$fake_bin/chroot" <<'EOF'
+#!/usr/bin/env bash
+shift
+"$@"
+EOF
+  chmod +x "$fake_bin"/*
+
+  PATH="$fake_bin:$PATH" run "$calamares/scripts/install-parental-guard" "$target"
+  [ "$status" -eq 0 ]
+  grep -q 'pam_unix.so' "$target/etc/pam.d/common-account"
+}
+
+@test "Ubuntu remove-parental-os-repo cleans up target apt repo and removes /srv/parental-os-repo" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  target="$TEST_TMP/target"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin" "$target/srv/parental-os-repo" "$target/etc/apt/sources.list.d"
+  printf 'fake deb\n' >"$target/srv/parental-os-repo/parental-guard_0.1.0-1_all.deb"
+  printf 'deb [trusted=yes] file:///srv/parental-os-repo ./\n' >"$target/etc/apt/sources.list.d/parental-os.list"
+  printf 'deb http://archive.ubuntu.com/ubuntu noble main\n' >"$target/etc/apt/sources.list.d/ubuntu.list"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+
+  run "$calamares/scripts/remove-parental-os-repo" "$target"
+  [ "$status" -eq 0 ]
+  [ ! -e "$target/srv/parental-os-repo" ]
+  [ ! -e "$target/etc/apt/sources.list.d/parental-os.list" ]
+  [ -f "$target/etc/apt/sources.list.d/ubuntu.list" ]
+}
+
+@test "Ubuntu runtime mode installs module files and scripts to live etc/calamares" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+  _run_ubuntu_transformer_runtime "$live/usr/share/calamares" "$live"
+  [ "$status" -eq 0 ]
+
+  [ -f "$live/etc/calamares/modules/services-systemd.conf" ]
+  [ -f "$live/etc/calamares/modules/shellprocess-before-online.conf" ]
+  [ -f "$live/etc/calamares/modules/shellprocess_cleanup_calamares.conf" ]
+  [ -x "$live/etc/calamares/scripts/copy-parental-os-repo" ]
+  [ -x "$live/etc/calamares/scripts/install-parental-guard" ]
+  [ -x "$live/etc/calamares/scripts/remove-parental-os-repo" ]
+  grep -q 'parental-guard.service' "$live/etc/calamares/modules/services-systemd.conf"
+  grep -q 'parental-guard-enroll.service' "$live/etc/calamares/modules/services-systemd.conf"
+}
+
+@test "Ubuntu stage mode patches calamares launcher when present" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+  cat >"$live/usr/local/bin/calamares-online.sh" <<'EOF'
+#!/usr/bin/env bash
+apt-get update && apt-get install -y calamares-settings-ubuntu
+exec calamares
+EOF
+
+  _run_ubuntu_transformer_source "$calamares" "$live" "calamares-settings-ubuntu"
+  [ "$status" -eq 0 ]
+
+  grep -q 'apply-parental-overlay.py runtime /usr/share/calamares /' "$live/usr/local/bin/calamares-online.sh"
+}
+
+@test "Ubuntu stage mode fails when launcher has unexpected package" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+  cat >"$live/usr/local/bin/calamares-online.sh" <<'EOF'
+#!/usr/bin/env bash
+apt-get install -y unexpected-calamares
+exec calamares
+EOF
+
+  _run_ubuntu_transformer_source "$calamares" "$live" "calamares-settings-ubuntu"
+  [ "$status" -ne 0 ]
+}
+
+@test "Ubuntu remove-parental-os-repo cleans up inline deb lines from sources.list" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  target="$TEST_TMP/target"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin" "$target/srv/parental-os-repo" "$target/etc/apt"
+  cat >"$target/etc/apt/sources.list" <<'EOF'
+deb http://archive.ubuntu.com/ubuntu noble main universe
+deb [trusted=yes] file:///srv/parental-os-repo ./
+deb http://security.ubuntu.com/ubuntu noble-security main
+EOF
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -eq 0 ]
+
+  run "$calamares/scripts/remove-parental-os-repo" "$target/etc/apt/sources.list"
+  [ "$status" -eq 0 ]
+  ! grep -q 'parental-os-repo' "$target/etc/apt/sources.list"
+  grep -q 'archive.ubuntu.com' "$target/etc/apt/sources.list"
+  grep -q 'security.ubuntu.com' "$target/etc/apt/sources.list"
+  [ ! -e "$target/srv/parental-os-repo" ]
+}
+
+@test "Ubuntu apply-parental-overlay.py fails closed when units key is missing" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  printf 'invalid: true\n' >"$calamares/src/modules/services-systemd/services-systemd.conf"
+  mkdir -p "$live/usr/local/bin"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -ne 0 ]
+}
+
+@test "Ubuntu apply-parental-overlay.py fails closed when script key is missing in shellprocess" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  printf 'dontChroot: true\n' >"$calamares/src/modules/shellprocess/shellprocess-before-online.conf"
+  mkdir -p "$live/usr/local/bin"
+
+  _run_ubuntu_transformer_source "$calamares" "$live"
+  [ "$status" -ne 0 ]
+}
+
+@test "Ubuntu apply-parental-overlay.py fails closed when calamares source dir is missing" {
+  live="$TEST_TMP/live"
+  mkdir -p "$live"
+  run python3 "$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py" \
+    stage "$TEST_TMP/nonexistent" "$live"
+  [ "$status" -ne 0 ]
+}
+
+
 
