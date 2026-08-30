@@ -701,5 +701,261 @@ EOF
   [ "$status" -ne 0 ]
 }
 
+# ---------------------------------------------------------------------------
+# Host build driver & container entrypoint tests (Task 4)
+# ---------------------------------------------------------------------------
 
+@test "scripts/build-ubuntu.sh exists and is executable" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  [ -f "$f" ]
+  [ -x "$f" ]
+}
 
+@test "scripts/build-ubuntu.sh has valid bash syntax" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  run bash -n "$f"
+  [ "$status" -eq 0 ]
+}
+
+@test "scripts/build-ubuntu.sh sources common.sh and ubuntu.sh" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  grep -Eq 'source.*scripts/lib/common\.sh' "$f"
+  grep -Eq 'source.*scripts/lib/ubuntu\.sh' "$f"
+}
+
+@test "scripts/build-ubuntu.sh requires git, docker, and jq" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  grep -Fq 'require_cmd git' "$f"
+  grep -Fq 'require_cmd docker' "$f"
+  grep -Fq 'require_cmd jq' "$f"
+}
+
+@test "scripts/build-ubuntu.sh validates target (desktop | all) and rejects invalid" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  grep -Eq 'ubuntu_dispatch_editions' "$f"
+  grep -Eq 'unknown target' "$f"
+}
+
+@test "scripts/build-ubuntu.sh uses docker default context helper" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  grep -Fq 'docker_cli build' "$f"
+  grep -Fq 'docker_cli run' "$f"
+  ! grep -Eq '(^|[[:space:]])docker[[:space:]]+(build|run)([[:space:]]|$)' "$f"
+}
+
+@test "scripts/build-ubuntu.sh uses docker_cli run with --rm and --privileged" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  grep -Fq 'docker_cli run' "$f"
+  grep -Fq -- '--rm' "$f"
+  grep -Fq -- '--privileged' "$f"
+}
+
+@test "scripts/build-ubuntu.sh mounts repo read-only and out read-write with rprivate propagation" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  grep -Eq 'destination=/repo' "$f"
+  grep -Eq 'readonly' "$f"
+  grep -Eq 'destination=/out' "$f"
+  grep -Eq 'bind-propagation=rprivate' "$f"
+}
+
+@test "all generated paths in build-ubuntu.sh are under out/" {
+  f="$TEST_ROOT/scripts/build-ubuntu.sh"
+  ! grep -Fq 'distros/ubuntu/profile' "$f"
+  ! grep -Fq 'distros/ubuntu/lb' "$f"
+}
+
+@test "distros/ubuntu/container/build-edition.sh exists and is executable" {
+  f="$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+  [ -f "$f" ]
+  [ -x "$f" ]
+}
+
+@test "distros/ubuntu/container/build-edition.sh has valid bash syntax" {
+  f="$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+  run bash -n "$f"
+  [ "$status" -eq 0 ]
+}
+
+@test "Ubuntu build-edition.sh creates local apt repo with Packages index" {
+  pkg_dir="$TEST_TMP/packages"
+  staging_dir="$TEST_TMP/out/ubuntu/staging"
+  mkdir -p "$pkg_dir" "$staging_dir"
+  printf 'fake deb\n' >"$pkg_dir/parental-guard_0.1.0-1_all.deb"
+
+  export UBUNTU_CONTAINER_LIB_ONLY=1
+  export REPO_DIR="$TEST_ROOT"
+  export OUT_DIR="$TEST_TMP/out"
+  export PACKAGES_OUT="$pkg_dir"
+  export UBUNTU_STAGING="$staging_dir"
+  # shellcheck source=/dev/null
+  source "$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+
+  run create_local_repo
+  [ "$status" -eq 0 ]
+  [ -f "$staging_dir/parental-os-repo/parental-guard_0.1.0-1_all.deb" ]
+  [ -f "$staging_dir/parental-os-repo/Packages" ]
+  [ -f "$staging_dir/parental-os-repo/Packages.gz" ]
+  [ -d "$staging_dir/parental-os-repo-srv" ]
+}
+
+@test "Ubuntu build-edition.sh verify_provenance validates checked-out SHAs against provenance.json" {
+  stage="$TEST_TMP/out/ubuntu/staging/desktop"
+  out="$TEST_TMP/out/ubuntu/desktop"
+  mkdir -p "$stage/ubuntu-live-iso" "$stage/ubuntu-calamares" "$out"
+
+  _make_source_repo "$TEST_TMP/live.git" "$TEST_TMP/live_work"
+  cp -a "$TEST_TMP/live_work/." "$stage/ubuntu-live-iso/"
+  _make_source_repo "$TEST_TMP/cal.git" "$TEST_TMP/cal_work"
+  cp -a "$TEST_TMP/cal_work/." "$stage/ubuntu-calamares/"
+
+  live_sha="$(git -C "$stage/ubuntu-live-iso" rev-parse HEAD)"
+  cal_sha="$(git -C "$stage/ubuntu-calamares" rev-parse HEAD)"
+
+  ubuntu_provenance_write "$out/provenance.json" \
+    edition=desktop \
+    live_iso_url="https://github.com/lubuntu-team/calamares-settings-ubuntu.git" \
+    live_iso_branch=master \
+    live_iso_sha="$live_sha" \
+    calamares_url="https://github.com/lubuntu-team/calamares-settings-ubuntu.git" \
+    calamares_branch=master \
+    calamares_sha="$cal_sha" \
+    resolved_at="2026-08-30T00:00:00Z" \
+    parental_os_revision=abcdef0 \
+    parental_os_dirty=false \
+    builder_image="parental-os-ubuntu-builder:latest"
+
+  export UBUNTU_CONTAINER_LIB_ONLY=1
+  export REPO_DIR="$TEST_ROOT"
+  export OUT_DIR="$TEST_TMP/out"
+  export UBUNTU_STAGING="$TEST_TMP/out/ubuntu/staging"
+  # shellcheck source=/dev/null
+  source "$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+
+  run verify_provenance desktop
+  [ "$status" -eq 0 ]
+}
+
+@test "Ubuntu build-edition.sh verify_provenance fails closed on SHA mismatch" {
+  stage="$TEST_TMP/out/ubuntu/staging/desktop"
+  out="$TEST_TMP/out/ubuntu/desktop"
+  mkdir -p "$stage/ubuntu-live-iso" "$stage/ubuntu-calamares" "$out"
+
+  _make_source_repo "$TEST_TMP/live.git" "$TEST_TMP/live_work"
+  cp -a "$TEST_TMP/live_work/." "$stage/ubuntu-live-iso/"
+  _make_source_repo "$TEST_TMP/cal.git" "$TEST_TMP/cal_work"
+  cp -a "$TEST_TMP/cal_work/." "$stage/ubuntu-calamares/"
+
+  ubuntu_provenance_write "$out/provenance.json" \
+    edition=desktop \
+    live_iso_url="https://github.com/lubuntu-team/calamares-settings-ubuntu.git" \
+    live_iso_branch=master \
+    live_iso_sha="0000000000000000000000000000000000000000" \
+    calamares_url="https://github.com/lubuntu-team/calamares-settings-ubuntu.git" \
+    calamares_branch=master \
+    calamares_sha="1111111111111111111111111111111111111111" \
+    resolved_at="2026-08-30T00:00:00Z" \
+    parental_os_revision=abcdef0 \
+    parental_os_dirty=false \
+    builder_image="parental-os-ubuntu-builder:latest"
+
+  export UBUNTU_CONTAINER_LIB_ONLY=1
+  export REPO_DIR="$TEST_ROOT"
+  export OUT_DIR="$TEST_TMP/out"
+  export UBUNTU_STAGING="$TEST_TMP/out/ubuntu/staging"
+  # shellcheck source=/dev/null
+  source "$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+
+  run verify_provenance desktop
+  [ "$status" -ne 0 ]
+}
+
+@test "Ubuntu build-edition.sh stage_official_tree stages Calamares tree, repo, and applies transformer" {
+  live="$TEST_TMP/live"
+  calamares="$TEST_TMP/calamares"
+  repo="$TEST_TMP/repo"
+  staged="$TEST_TMP/staged"
+  mkdir -p "$live" "$repo"
+  _copy_ubuntu_calamares_fixture "$calamares"
+  printf 'fake deb\n' >"$repo/parental-guard_0.1.0-1_all.deb"
+  printf 'Package: parental-guard\n' >"$repo/Packages"
+
+  export UBUNTU_CONTAINER_LIB_ONLY=1
+  export REPO_DIR="$TEST_ROOT"
+  export OUT_DIR="$TEST_TMP/out"
+  # shellcheck source=/dev/null
+  source "$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+
+  run stage_official_tree desktop "$live" "$calamares" "$repo" "$staged"
+  [ "$status" -eq 0 ]
+  [ -f "$staged/airootfs/srv/parental-os-repo/parental-guard_0.1.0-1_all.deb" ]
+  [ -f "$staged/airootfs/etc/apt/sources.list.d/parental-os.list" ]
+  [ -x "$staged/airootfs/usr/local/lib/parental-os/apply-parental-overlay.py" ]
+  [ -d "$staged/airootfs/usr/share/calamares" ]
+}
+
+@test "Ubuntu build-edition.sh clean_edition_artifacts removes stale ISOs and logs while preserving provenance" {
+  edition_dir="$TEST_TMP/desktop"
+  mkdir -p "$edition_dir"
+  printf 'old iso\n' >"$edition_dir/parental-os-ubuntu-desktop.iso"
+  printf 'old sha\n' >"$edition_dir/parental-os-ubuntu-desktop.iso.sha256"
+  printf 'pkglist\n' >"$edition_dir/pkglist.x86_64.txt"
+  printf 'log\n' >"$edition_dir/build.log"
+  printf '{"edition":"desktop"}\n' >"$edition_dir/provenance.json"
+
+  export UBUNTU_CONTAINER_LIB_ONLY=1
+  export REPO_DIR="$TEST_ROOT"
+  export OUT_DIR="$TEST_TMP/out"
+  # shellcheck source=/dev/null
+  source "$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+
+  run clean_edition_artifacts "$edition_dir"
+  [ "$status" -eq 0 ]
+  [ ! -e "$edition_dir/parental-os-ubuntu-desktop.iso" ]
+  [ ! -e "$edition_dir/parental-os-ubuntu-desktop.iso.sha256" ]
+  [ ! -e "$edition_dir/pkglist.x86_64.txt" ]
+  [ ! -e "$edition_dir/build.log" ]
+  [ -f "$edition_dir/provenance.json" ]
+}
+
+@test "Ubuntu build-edition.sh clean_edition_artifacts handles root-owned files with sudo fallback" {
+  f="$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+  [ -f "$f" ]
+  grep -Eq 'sudo[[:space:]]+rm[[:space:]]+-rf[[:space:]]+"\$\{generated_artifacts\[@\]\}"' "$f"
+}
+
+@test "Ubuntu build-edition.sh produces normalized ISO, sha256, and logs adhering to ubuntu_validate_artifact_set" {
+  stage="$TEST_TMP/out/ubuntu/staging/desktop"
+  out="$TEST_TMP/out/ubuntu/desktop"
+  mkdir -p "$stage/profile-work/airootfs" "$stage/profile-work/out" "$out"
+  printf 'fake iso\n' >"$stage/profile-work/out/parental-os-ubuntu-desktop.iso"
+
+  ubuntu_provenance_write "$out/provenance.json" \
+    edition=desktop \
+    live_iso_url="https://github.com/lubuntu-team/calamares-settings-ubuntu.git" \
+    live_iso_branch=master \
+    live_iso_sha="abcdef0123456789abcdef0123456789abcdef01" \
+    calamares_url="https://github.com/lubuntu-team/calamares-settings-ubuntu.git" \
+    calamares_branch=master \
+    calamares_sha="bbbbbbb0123456789abcdef0123456789abcdef0" \
+    resolved_at="2026-08-30T00:00:00Z" \
+    parental_os_revision=abcdef0 \
+    parental_os_dirty=false \
+    builder_image="parental-os-ubuntu-builder:latest"
+
+  export UBUNTU_CONTAINER_LIB_ONLY=1
+  export REPO_DIR="$TEST_ROOT"
+  export OUT_DIR="$TEST_TMP/out"
+  export UBUNTU_STAGING="$TEST_TMP/out/ubuntu/staging"
+  export LOGS_OUT="$TEST_TMP/out/logs"
+  mkdir -p "$LOGS_OUT"
+  # shellcheck source=/dev/null
+  source "$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+
+  run build_iso desktop
+  [ "$status" -eq 0 ]
+  [ -f "$out/parental-os-ubuntu-desktop.iso" ]
+  [ -f "$out/parental-os-ubuntu-desktop.iso.sha256" ]
+  [ -f "$out/build.log" ]
+  run ubuntu_validate_artifact_set desktop "$out"
+  [ "$status" -eq 0 ]
+}

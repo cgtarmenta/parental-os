@@ -11,7 +11,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/lib/common.sh"
 export PARENTAL_OS_ROOT="$ROOT"
 ensure_out_dirs
-require_cmd docker
+if ! command -v dpkg-buildpackage >/dev/null 2>&1; then
+  require_cmd docker
+fi
 require_cmd rsync
 
 OUT="$(out_root)"
@@ -27,9 +29,13 @@ DEB_OUT="$OUT/packages"
 # Clean the staging parent. If root-owned files from a previous Docker build
 # exist, the host rm may fail; fall back to a Docker container for cleanup.
 if ! rm -rf "$STAGE_PARENT" 2>/dev/null; then
-  log "host rm failed (root-owned files); cleaning via Docker container..."
-  docker_cli run --rm -v "$OUT:/cleanout" alpine:latest \
-    sh -c "rm -rf /cleanout/deb-src && echo cleaned" >/dev/null 2>&1 || true
+  log "host rm failed (root-owned files); cleaning via Docker container or sudo..."
+  if command -v docker >/dev/null 2>&1; then
+    docker_cli run --rm -v "$OUT:/cleanout" alpine:latest \
+      sh -c "rm -rf /cleanout/deb-src && echo cleaned" >/dev/null 2>&1 || true
+  else
+    sudo rm -rf "$STAGE_PARENT" 2>/dev/null || true
+  fi
   rm -rf "$STAGE_PARENT" 2>/dev/null || true
 fi
 mkdir -p "$STAGE" "$DEB_OUT"
@@ -53,21 +59,30 @@ tar -czf "$ORIG_TGZ" -C "$STAGE_PARENT" \
   --exclude="${SRCNAME}-${PKGVER}/debian" \
   "${SRCNAME}-${PKGVER}"
 
-log "building deb in docker (debian:bookworm) from $STAGE"
-docker_cli run --rm \
-  -v "$STAGE_PARENT:/build" \
-  -w "/build/${SRCNAME}-${PKGVER}" \
-  debian:bookworm \
-  bash -lc '
-    set -euo pipefail
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y --no-install-recommends build-essential debhelper dpkg-dev fakeroot
-    # Build the 3.0 (quilt) source package, then the binary package.
+if command -v dpkg-buildpackage >/dev/null 2>&1 && [[ "${FORCE_DOCKER:-0}" != "1" ]]; then
+  log "building deb locally using dpkg-buildpackage from $STAGE"
+  (
+    cd "$STAGE"
     dpkg-source -b .
     dpkg-buildpackage -us -uc -b
-    ls -la /build
-  ' 2>&1 | tee "$OUT/logs/parental-guard-deb-build.log"
+  ) 2>&1 | tee "$OUT/logs/parental-guard-deb-build.log"
+else
+  log "building deb in docker (debian:bookworm) from $STAGE"
+  docker_cli run --rm \
+    -v "$STAGE_PARENT:/build" \
+    -w "/build/${SRCNAME}-${PKGVER}" \
+    debian:bookworm \
+    bash -lc '
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y --no-install-recommends build-essential debhelper dpkg-dev fakeroot
+      # Build the 3.0 (quilt) source package, then the binary package.
+      dpkg-source -b .
+      dpkg-buildpackage -us -uc -b
+      ls -la /build
+    ' 2>&1 | tee "$OUT/logs/parental-guard-deb-build.log"
+fi
 
 # Copy the binary .deb and the source .dsc into out/packages.
 shopt -s nullglob
