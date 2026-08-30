@@ -79,7 +79,7 @@ setup() {
   s="$TEST_ROOT/scripts/make-cloud-init-seed.sh"
   grep -q -- '--profile' "$s"
   grep -q 'user-data-install' "$s"
-  grep -qE 'PROFILE="${PROFILE:-smoke}"|PROFILE=smoke' "$s"
+  grep -qE 'PROFILE="\$\{PROFILE:-smoke\}"|PROFILE=smoke' "$s"
 }
 
 @test "install seed launches calamares against the shipped unattended tree" {
@@ -139,3 +139,85 @@ setup() {
   grep -q 'parental-users' "$s"
   grep -q 'parental-guard' "$s"
 }
+
+# ---------------------------------------------------------------------------
+# Ubuntu unattended Calamares tree invariants
+# ---------------------------------------------------------------------------
+
+@test "ubuntu unattended settings.conf exists and disables the install prompt" {
+  local u="$TEST_ROOT/distros/ubuntu/calamares/unattended"
+  [ -f "$u/settings.conf" ]
+  grep -qE '^prompt-install:[[:space:]]*false' "$u/settings.conf"
+}
+
+@test "ubuntu unattended settings.conf quits at end so QEMU sees termination" {
+  local u="$TEST_ROOT/distros/ubuntu/calamares/unattended"
+  grep -qE '^quit-at-end:[[:space:]]*true' "$u/settings.conf"
+}
+
+@test "ubuntu every show step has an autoProceed instance" {
+  local u="$TEST_ROOT/distros/ubuntu/calamares/unattended"
+  shown="$(awk '/^- show:/{f=1;next} /^- exec:/{f=0} f && /^ *- /{gsub(/[ -]/,"");print}' \
+    "$u/settings.conf")"
+  [ -n "$shown" ]
+  for step in $shown; do
+    mod="${step%%@*}"
+    grep -q "module:[[:space:]]*$mod" "$u/settings.conf"
+  done
+  n_show="$(printf '%s\n' $shown | wc -l)"
+  n_auto="$(grep -c 'autoProceed:[[:space:]]*true' "$u/settings.conf")"
+  [ "$n_auto" -ge "$n_show" ]
+}
+
+@test "ubuntu unattended show: sequence is NOT emptied" {
+  local u="$TEST_ROOT/distros/ubuntu/calamares/unattended"
+  run awk '/^- show:/{f=1;next} /^- exec:/{f=0} f && /^ *- /{c++} END{print c+0}' \
+    "$u/settings.conf"
+  [ "$output" -gt 0 ]
+}
+
+@test "ubuntu partition.conf erases at top level AND in every bootloaderOverrides entry" {
+  local u="$TEST_ROOT/distros/ubuntu/calamares/unattended"
+  [ -f "$u/modules/partition.conf" ]
+  n_erase="$(grep -c 'initialPartitioningChoice:[[:space:]]*erase' "$u/modules/partition.conf")"
+  n_over="$(grep -c 'initialPartitioningChoice:' "$u/modules/partition.conf")"
+  [ "$n_erase" -eq "$n_over" ]
+  [ "$n_erase" -ge 2 ]
+}
+
+@test "ubuntu finished.conf powers off, giving the test its success oracle" {
+  local u="$TEST_ROOT/distros/ubuntu/calamares/unattended"
+  [ -f "$u/modules/finished.conf" ]
+  grep -qE '^restartNowMode:[[:space:]]*always' "$u/modules/finished.conf"
+  grep -q 'poweroff' "$u/modules/finished.conf"
+}
+
+@test "ubuntu users.conf presets a login name so the users page can self-advance" {
+  local u="$TEST_ROOT/distros/ubuntu/calamares/unattended"
+  [ -f "$u/modules/users.conf" ]
+  grep -q 'presets:' "$u/modules/users.conf"
+  grep -q 'loginName:' "$u/modules/users.conf"
+}
+
+@test "ubuntu unattended tree is never wired into a shipping settings file" {
+  ! grep -rq 'unattended' "$TEST_ROOT/distros/ubuntu/calamares/apply-parental-overlay.py"
+}
+
+@test "ubuntu unattended README documents test-only purpose" {
+  local u="$TEST_ROOT/distros/ubuntu/calamares/unattended"
+  [ -f "$u/README.md" ]
+  grep -qi 'test only' "$u/README.md"
+  grep -qi 'autoProceed' "$u/README.md"
+}
+
+@test "test-install.sh supports ubuntu as single target" {
+  s="$TEST_ROOT/scripts/test-install.sh"
+  grep -q 'qemu_require_single_target' "$s" || grep -q 'TARGET' "$s"
+}
+
+@test "assert_target.sh supports checking deb and arch package status" {
+  s="$TEST_ROOT/tests/qemu/assert_target.sh"
+  grep -q 'dpkg' "$s"
+  grep -q 'pacman' "$s"
+}
+

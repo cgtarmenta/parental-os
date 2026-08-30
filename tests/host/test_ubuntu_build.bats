@@ -891,6 +891,8 @@ EOF
   [ -f "$staged/airootfs/etc/apt/sources.list.d/parental-os.list" ]
   [ -x "$staged/airootfs/usr/local/lib/parental-os/apply-parental-overlay.py" ]
   [ -d "$staged/airootfs/usr/share/calamares" ]
+  [ -d "$staged/airootfs/usr/share/parental-os/unattended" ]
+  [ -f "$staged/airootfs/usr/share/parental-os/unattended/settings.conf" ]
 }
 
 @test "Ubuntu build-edition.sh clean_edition_artifacts removes stale ISOs and logs while preserving provenance" {

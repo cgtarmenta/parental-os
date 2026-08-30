@@ -192,6 +192,8 @@ stage_official_tree() {
     mkdir -p "$airootfs/usr/share/parental-os/unattended"
     cp -a "$unattended_src/." "$airootfs/usr/share/parental-os/unattended/"
     log "stage_official_tree: shipped unattended Calamares tree"
+  else
+    die "unattended Calamares tree not found at $unattended_src"
   fi
 }
 
