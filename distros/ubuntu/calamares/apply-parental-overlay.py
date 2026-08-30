@@ -53,6 +53,8 @@ SERVICES_CANDIDATES = [
     "src/modules/services-systemd.conf",
     "modules/services-systemd/services-systemd.conf",
     "modules/services-systemd.conf",
+    "lubuntu/modules/services-systemd.conf",
+    "ubuntustudio/modules/services-systemd.conf",
     "etc/calamares/modules/services-systemd.conf",
 ]
 
@@ -63,6 +65,10 @@ BEFORE_SHELLPROCESS_CANDIDATES = [
     "modules/shellprocess-before-online.conf",
     "modules/shellprocess-before.conf",
     "modules/shellprocess.conf",
+    "lubuntu/modules/shellprocess_add386arch.conf",
+    "ubuntustudio/modules/shellprocess_add386arch.conf",
+    "lubuntu/modules/shellprocess_bug-LP#1829805.conf",
+    "ubuntustudio/modules/shellprocess_bug-LP#1829805.conf",
 ]
 
 CLEANUP_SHELLPROCESS_CANDIDATES = [
@@ -72,12 +78,16 @@ CLEANUP_SHELLPROCESS_CANDIDATES = [
     "modules/shellprocess_cleanup_calamares.conf",
     "modules/shellprocess_cleanup.conf",
     "modules/shellprocess-final.conf",
+    "lubuntu/modules/shellprocess_logs.conf",
+    "ubuntustudio/modules/shellprocess_logs.conf",
 ]
 
 PACKAGES_CANDIDATES = [
     "src/modules/packages/packages.conf",
     "modules/packages/packages.conf",
     "modules/packages.conf",
+    "lubuntu/modules/packages.conf",
+    "ubuntustudio/modules/packages.conf",
 ]
 
 
@@ -135,12 +145,12 @@ def add_services_to_systemd(conf_path: Path) -> None:
 
 
 def add_package_to_packages(conf_path: Path) -> None:
-    """Add parental-guard to packages.conf install list if present."""
+    """Add parental-guard to packages.conf install or try_install list if present."""
     content = load_yaml(conf_path)
     if PARENTAL_GUARD_PKG in content:
         return
 
-    pattern = r"(install:\s*\n(?:\s*#\s*[^\n]*\n)*\s*)(  - )"
+    pattern = r"((?:install|try_install):\s*\n(?:\s*#\s*[^\n]*\n)*\s*)(  - |      - )"
     match = re.search(pattern, content)
     if match:
         insertion = f"{match.group(1)}{match.group(2)}{PARENTAL_GUARD_PKG}\n"
@@ -448,7 +458,33 @@ def install_live_calamares_files(calamares_src_dir: Path, live_airootfs_dir: Pat
 
 def transform_source(calamares_src_dir: Path) -> None:
     """Transform the source configuration tree."""
-    services_conf = find_conf_file(calamares_src_dir, SERVICES_CANDIDATES)
+    services_conf = find_conf_file(calamares_src_dir, SERVICES_CANDIDATES, required=False)
+    if services_conf is None:
+        # Check if flavor directories exist (lubuntu, ubuntustudio, etc.)
+        for flavor in ("lubuntu", "ubuntustudio"):
+            flavor_modules = calamares_src_dir / flavor / "modules"
+            if flavor_modules.is_dir():
+                svc_path = flavor_modules / "services-systemd.conf"
+                svc_path.write_text(
+                    "---\n"
+                    "units:\n"
+                    '  - name: "parental-guard.service"\n'
+                    '    action: "enable"\n'
+                    '    mandatory: true\n'
+                    '  - name: "parental-guard-agent.service"\n'
+                    '    action: "enable"\n'
+                    '    mandatory: true\n'
+                    '  - name: "parental-guard-enroll.service"\n'
+                    '    action: "enable"\n'
+                    '    mandatory: true\n'
+                    '  - name: "parental-guard-enroll.path"\n'
+                    '    action: "enable"\n'
+                    '    mandatory: true\n',
+                    encoding="utf-8",
+                )
+                print(f"apply-parental-overlay: generated {svc_path}")
+        services_conf = find_conf_file(calamares_src_dir, SERVICES_CANDIDATES, required=True)
+
     before_conf = find_conf_file(calamares_src_dir, BEFORE_SHELLPROCESS_CANDIDATES)
     cleanup_conf = find_conf_file(calamares_src_dir, CLEANUP_SHELLPROCESS_CANDIDATES)
     pkg_conf = find_conf_file(calamares_src_dir, PACKAGES_CANDIDATES, required=False)

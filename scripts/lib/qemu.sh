@@ -52,6 +52,9 @@ qemu_iso_for_target() {
   fi
   shopt -s nullglob
   local files=("$dir"/*.iso)
+  if [[ "${#files[@]}" -eq 0 && -d "$dir/desktop" ]]; then
+    files=("$dir/desktop"/*.iso)
+  fi
   if [[ "$nullglob_was_set" -eq 0 ]]; then
     shopt -u nullglob
   fi

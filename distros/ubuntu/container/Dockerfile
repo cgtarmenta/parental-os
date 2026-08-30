@@ -34,5 +34,9 @@ RUN apt-get update -qq \
       sudo \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /build
+
+COPY build-edition.sh /usr/local/bin/build-edition.sh
+RUN chmod 755 /usr/local/bin/build-edition.sh
+
+ENTRYPOINT ["/usr/local/bin/build-edition.sh"]

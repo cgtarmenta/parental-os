@@ -116,6 +116,8 @@ verify_provenance() {
   local stage="$UBUNTU_STAGING/$edition"
   local prov="$OUT_DIR/ubuntu/$edition/provenance.json"
 
+  git config --global --add safe.directory "*" 2>/dev/null || true
+
   [[ -f "$prov" ]] || die "provenance not found for $edition: $prov"
   ubuntu_provenance_validate "$prov" || die "provenance validation failed for $edition"
 
@@ -318,6 +320,11 @@ build_iso() {
     (cd "$edition_out" && sha256sum "$(basename "$f")" > "$(basename "$f")".sha256)
   done
   shopt -u nullglob
+
+  # Also expose at top-level out/ubuntu/ for drivers expecting out/ubuntu/*.iso
+  if [[ -f "$edition_out/${iso_basename}.iso" ]]; then
+    cp -f "$edition_out/${iso_basename}.iso" "$OUT_DIR/ubuntu/${iso_basename}.iso" 2>/dev/null || true
+  fi
 
   ubuntu_validate_artifact_set "$edition" "$edition_out" \
     || die "artifact validation failed for $edition"
