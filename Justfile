@@ -11,8 +11,8 @@ test-host:
 build target="all":
   "{{root}}/scripts/build-all.sh" "{{target}}"
 
-build-ubuntu:
-  "{{root}}/scripts/build-ubuntu.sh"
+build-ubuntu target="all":
+  "{{root}}/scripts/build-ubuntu.sh" "{{target}}"
 
 build-cachyos edition="all":
   "{{root}}/scripts/build-cachyos.sh" "{{edition}}"
@@ -33,7 +33,7 @@ qemu-browser-down:
   "{{root}}/scripts/qemu-browser.sh" down
 
 clean:
-  rm -rf "{{root}}/out"/*
+  sudo rm -rf "{{root}}/out"/* 2>/dev/null || rm -rf "{{root}}/out"/* 2>/dev/null || docker --context default run --rm -v "{{root}}/out":/out alpine rm -rf /out/* 2>/dev/null || true
   mkdir -p "{{root}}/out/ubuntu" "{{root}}/out/cachyos" "{{root}}/out/packages" "{{root}}/out/logs" "{{root}}/out/qemu"
 
 

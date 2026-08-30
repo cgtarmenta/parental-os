@@ -12,10 +12,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=/dev/null
 source "$ROOT/scripts/lib/common.sh"
+# shellcheck source=/dev/null
+source "$ROOT/scripts/lib/qemu.sh"
 export PARENTAL_OS_ROOT="$ROOT"
 export DOCKER_CONTEXT="${DOCKER_CONTEXT:-default}"
 
-TARGET="${1:-cachyos-desktop}"
+TARGET="$(qemu_require_single_target "${1:-cachyos-desktop}")"
 INSTALL_TIMEOUT="${PARENTAL_OS_INSTALL_TIMEOUT:-2700}"
 OUT="$(out_root)"
 STATE="$OUT/qemu/install/$TARGET"

@@ -118,29 +118,35 @@ fi
 # ---------------------------------------------------------------------------
 # The system booted off the installed disk, not the live ISO.
 # ---------------------------------------------------------------------------
-# archiso sets archisobasedir= on the kernel command line and mounts the live
-# medium at /run/archiso (see archiso's airootfs init). Neither exists on a
-# disk-installed boot. Asserting this first means the rest of the checks cannot
-# pass against the live image by accident.
+# archiso sets archisobasedir= and casper sets boot=casper on the kernel
+# command line and mounts the live medium at /run/archiso or /run/casper.
+# Neither exists on a disk-installed boot. Asserting this first means the
+# rest of the checks cannot pass against the live image by accident.
 echo "=== booted from disk, not the live ISO ==="
 check "no archisobasedir= on kernel cmdline" \
       "! grep -q 'archisobasedir=' /proc/cmdline"
 check "no /run/archiso live medium" \
       "! test -d /run/archiso"
+check "no boot=casper on kernel cmdline" \
+      "! grep -q 'boot=casper' /proc/cmdline"
+check "no /run/casper live medium" \
+      "! test -d /run/casper"
 
 # ---------------------------------------------------------------------------
 # parental-guard present and the installed account enrolled
 # ---------------------------------------------------------------------------
 echo "=== installed target: parental-guard present and enrolled ==="
-check "parental-guard installed"          "pacman -Qi parental-guard"
-check "parental-guard.service enabled"    "systemctl is-enabled parental-guard.service"
+check "parental-guard installed" \
+      "dpkg -s parental-guard >/dev/null 2>&1 || pacman -Qi parental-guard >/dev/null 2>&1"
+check "parental-guard.service enabled" \
+      "systemctl is-enabled parental-guard.service"
 check "parental-guard-enroll.service enabled" \
-                                          "systemctl is-enabled parental-guard-enroll.service"
+      "systemctl is-enabled parental-guard-enroll.service || systemctl is-enabled parental-guard-enroll.path"
 check "parental-users group exists"       "getent group parental-users"
 check "installed user exists"             "id $USER_NAME"
 check "installed user is enrolled"        "id -nG | tr ' ' '\n' | grep -qx parental-users"
 check "sudoers drop-in present"           "test -f /etc/sudoers.d/parental-os"
-check "sudoers is valid"                  "sudo -n visudo -c >/dev/null || visudo -c >/dev/null"
+check "sudoers is valid"                  "sudo -n visudo -c >/dev/null 2>&1 || visudo -c >/dev/null 2>&1"
 
 # ---------------------------------------------------------------------------
 # agent enabled AND healthy (not just installed)
@@ -150,9 +156,9 @@ check "sudoers is valid"                  "sudo -n visudo -c >/dev/null || visud
 # answers, mirroring assert_guest.sh and tests/host/test_agent_health.bats.
 echo "=== agent enabled and healthy ==="
 check "parental-guard-agent.service enabled" \
-                                          "systemctl is-enabled parental-guard-agent.service"
+      "systemctl is-enabled parental-guard-agent.service"
 check "parental-guard-agent.service active" \
-                                          "systemctl is-active --quiet parental-guard-agent.service"
+      "systemctl is-active --quiet parental-guard-agent.service"
 check "agent /health endpoint responds" \
       "curl -sf -o /dev/null http://127.0.0.1:$AGENT_PORT/health"
 
@@ -161,17 +167,21 @@ check "agent /health endpoint responds" \
 # ---------------------------------------------------------------------------
 echo "=== temporary build scaffolding must NOT survive ==="
 check "no [parental-os] stanza in pacman.conf" \
-      "! grep -q '^\[parental-os\]' /etc/pacman.conf"
+      "! test -f /etc/pacman.conf || ! grep -q '^\[parental-os\]' /etc/pacman.conf"
 check "no [parental-os] stanza in pacman-more.conf" \
-      "! grep -q '^\[parental-os\]' /etc/pacman-more.conf"
+      "! test -f /etc/pacman-more.conf || ! grep -q '^\[parental-os\]' /etc/pacman-more.conf"
+check "no /etc/apt/sources.list.d/parental-os.list" \
+      "! test -f /etc/apt/sources.list.d/parental-os.list"
+check "no parental-os repo in /etc/apt/sources.list" \
+      "! test -f /etc/apt/sources.list || ! grep -q 'parental-os-repo' /etc/apt/sources.list"
 check "no /srv/parental-os-repo"          "! test -d /srv/parental-os-repo"
 
 # ---------------------------------------------------------------------------
 # defects the re-plan documents; SP-B flips these
 # ---------------------------------------------------------------------------
 echo "=== defects the re-plan documents; SP-B flips these ==="
-expect_today "installed user is in wheel" \
-      "id -nG | tr ' ' '\n' | grep -qx wheel" \
+expect_today "installed user is in wheel or sudo" \
+      "id -nG | tr ' ' '\n' | grep -qE '^(wheel|sudo)$'" \
       "users.conf:18 defaultGroups"
 expect_today "pkexec grants root to the child" \
       "pkexec --version" \
