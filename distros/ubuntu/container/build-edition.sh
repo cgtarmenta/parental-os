@@ -304,26 +304,64 @@ run_official_build() {
     bsdtar -xf "$base_iso_path" -C "$iso_extracted" || xorriso -osirx on -indev "$base_iso_path" -extract / "$iso_extracted"
   fi
 
-  # Step 3: Extract the genuine desktop squashfs
-  local squashfs_file=""
-  if [[ -f "$iso_extracted/casper/filesystem.squashfs" ]]; then
-    squashfs_file="$iso_extracted/casper/filesystem.squashfs"
-  elif [[ -f "$iso_extracted/casper/minimal.squashfs" ]]; then
-    squashfs_file="$iso_extracted/casper/minimal.squashfs"
-  elif [[ -f "$iso_extracted/casper/ubuntu-desktop-minimal.squashfs" ]]; then
-    squashfs_file="$iso_extracted/casper/ubuntu-desktop-minimal.squashfs"
-  else
-    shopt -s nullglob
-    local found_squash=("$iso_extracted/casper"/*.squashfs)
-    shopt -u nullglob
-    if [[ "${#found_squash[@]}" -gt 0 ]]; then
-      squashfs_file="${found_squash[0]}"
-    fi
-  fi
-  [[ -n "$squashfs_file" && -f "$squashfs_file" ]] || die "no squashfs found in official ISO at $iso_extracted/casper"
+  # Step 3: Extract all genuine desktop squashfs layers in dependency order into chroot_dir
+  log "Mounting and merging all genuine live desktop squashfs layers..."
+  local mount_tmp="$work_dir/mounts"
+  mkdir -p "$mount_tmp"
 
-  log "Extracting genuine live desktop squashfs ($squashfs_file)..."
-  unsquashfs -d "$chroot_dir" -f "$squashfs_file" >/dev/null || die "failed to extract squashfs"
+  # Collect all layers in top-to-bottom order for overlayfs:
+  # 1. language and extra layers (top)
+  # 2. minimal.standard.live.squashfs
+  # 3. minimal.standard.squashfs
+  # 4. minimal.squashfs (bottom)
+  local all_layers=()
+  shopt -s nullglob
+  for layer in "$iso_extracted/casper"/*.squashfs; do
+    local bname="$(basename "$layer")"
+    if [[ "$bname" != "minimal.squashfs" && "$bname" != "minimal.standard.squashfs" && "$bname" != "minimal.standard.live.squashfs" ]]; then
+      all_layers+=("$layer")
+    fi
+  done
+  shopt -u nullglob
+
+  [[ -f "$iso_extracted/casper/minimal.standard.live.squashfs" ]] && all_layers+=("$iso_extracted/casper/minimal.standard.live.squashfs")
+  [[ -f "$iso_extracted/casper/minimal.standard.squashfs" ]] && all_layers+=("$iso_extracted/casper/minimal.standard.squashfs")
+  [[ -f "$iso_extracted/casper/minimal.squashfs" ]] && all_layers+=("$iso_extracted/casper/minimal.squashfs")
+
+  local lower_str=""
+  local i=0
+  for layer in "${all_layers[@]}"; do
+    local mnt="$mount_tmp/layer_$i"
+    mkdir -p "$mnt"
+    log "  Extracting layer: $(basename "$layer")..."
+    unsquashfs -d "$mnt" "$layer" >/dev/null || die "failed to extract $layer"
+    if [[ -z "$lower_str" ]]; then
+      lower_str="$mnt"
+    else
+      lower_str="$lower_str:$mnt"
+    fi
+    i=$((i+1))
+  done
+
+  local merged_dir="$work_dir/merged"
+  local upper_dir="$work_dir/upper"
+  local work_cow="$work_dir/work-cow"
+  mkdir -p "$merged_dir" "$upper_dir" "$work_cow"
+
+  if mount -t overlay overlay -o "lowerdir=$lower_str,upperdir=$upper_dir,workdir=$work_cow" "$merged_dir" 2>/dev/null; then
+    log "Successfully mounted layered rootfs using kernel overlayfs"
+    cp -a "$merged_dir/." "$chroot_dir/"
+    umount -l "$merged_dir" 2>/dev/null || true
+  else
+    log "Overlayfs mount not supported in container, merging layers bottom-up..."
+    # Merge from bottom to top: last element in all_layers is minimal.squashfs (bottom)
+    for ((idx=${#all_layers[@]}-1; idx>=0; idx--)); do
+      local mnt="$mount_tmp/layer_$idx"
+      (cd "$mnt" && tar -cf - .) | (cd "$chroot_dir" && tar -xf -)
+    done
+  fi
+
+  rm -rf "$mount_tmp" "$upper_dir" "$work_cow" "$merged_dir"
 
   # Step 4: Inject parental-guard and security configuration into live desktop chroot
   log "Injecting parental-guard, security policies, and PAM gating into genuine desktop rootfs..."
@@ -348,25 +386,14 @@ run_official_build() {
   chroot "$chroot_dir" env DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/parental-guard.deb || true
   rm -f "$chroot_dir/tmp/parental-guard.deb"
 
-  # Copy local repo into live /srv/parental-os-repo so Calamares can install to target
+  # Copy local repo into live /srv/parental-os-repo so installer can deploy to target
   mkdir -p "$chroot_dir/srv/parental-os-repo"
   cp -a /srv/parental-os-repo/. "$chroot_dir/srv/parental-os-repo/"
 
-  # Merge staged airootfs overlay (Calamares configs, parental overlay transformer, etc.)
+  # Merge staged airootfs overlay if present
   if [[ -d "$staged_dir/airootfs" ]]; then
     log "Applying staged airootfs overlay to genuine live rootfs..."
     cp -a "$staged_dir/airootfs/." "$chroot_dir/"
-  fi
-
-  # Apply Calamares parental overlay transformer on /etc/calamares in the chroot
-  if [[ -d "$chroot_dir/etc/calamares" ]]; then
-    log "Applying Calamares parental overlay to /etc/calamares..."
-    python3 "$REPO_DIR/distros/ubuntu/calamares/apply-parental-overlay.py" \
-      stage \
-      "$chroot_dir/etc/calamares" \
-      "$chroot_dir" \
-      "$REPO_DIR/distros/ubuntu/calamares/apply-parental-overlay.py" \
-      "calamares-settings-ubuntu" >/dev/null || true
   fi
 
   # Ensure all 4 parental units are enabled in chroot
@@ -382,16 +409,34 @@ run_official_build() {
   cleanup_chroot_mounts
   trap - EXIT
 
-  # Step 5: Re-pack filesystem.squashfs
-  log "Compressing updated genuine live desktop filesystem.squashfs..."
-  rm -f "$squashfs_file"
-  mksquashfs "$chroot_dir" "$squashfs_file" -comp xz -noappend -b 1048576 2>&1 | tee -a "$staged_dir/out/squashfs.log" || true
+  # Step 5: Re-pack unified filesystem.squashfs and clean up fragmented layers
+  log "Compressing unified genuine live desktop filesystem.squashfs..."
+  rm -f "$iso_extracted/casper"/*.squashfs
+  mksquashfs "$chroot_dir" "$iso_extracted/casper/filesystem.squashfs" -comp xz -noappend -b 1048576 2>&1 | tee -a "$staged_dir/out/squashfs.log" || true
+  
+  # Provide compatibility link for minimal.squashfs
+  cp -l "$iso_extracted/casper/filesystem.squashfs" "$iso_extracted/casper/minimal.squashfs" 2>/dev/null || \
+    ln -s "filesystem.squashfs" "$iso_extracted/casper/minimal.squashfs" 2>/dev/null || true
 
-  # Update size file for casper
-  printf '%s\n' "$(du -sx --block-size=1 "$chroot_dir" 2>/dev/null | cut -f1)" > "$iso_extracted/casper/filesystem.size"
+  # Update size files for casper
+  local uncompressed_size
+  uncompressed_size="$(du -sx --block-size=1 "$chroot_dir" 2>/dev/null | cut -f1)"
+  printf '%s\n' "$uncompressed_size" > "$iso_extracted/casper/filesystem.size"
+  printf '%s\n' "$uncompressed_size" > "$iso_extracted/casper/minimal.size"
+
+  # Clean up obsolete layer manifest and size files
+  find "$iso_extracted/casper" -type f \( -name "minimal.*.manifest*" -o -name "minimal.*.size" \) -delete 2>/dev/null || true
 
   # Clean work chroot to free space
   rm -rf "$chroot_dir"
+
+  # Recompute ISO md5sum manifest
+  log "Recomputing ISO md5sum manifest..."
+  (
+    cd "$iso_extracted"
+    rm -f md5sum.txt
+    find . -type f ! -path "./boot.catalog" ! -path "./isolinux/boot.cat" -exec md5sum {} + > md5sum.txt 2>/dev/null || true
+  )
 
   # Step 6: Rebuild bootable hybrid ISO with xorriso / grub-mkrescue
   log "Generating bootable hybrid desktop ISO with xorriso..."
