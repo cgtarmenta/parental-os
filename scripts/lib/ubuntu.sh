@@ -17,6 +17,8 @@ ubuntu_edition_metadata() {
   local edition="$1"
   case "$edition" in
     desktop)
+      printf 'official_iso_url=https://cdimage.ubuntu.com/lubuntu/releases/24.04/release/lubuntu-24.04.4-desktop-amd64.iso\n'
+      printf 'official_iso_sha256=5ca3ab769f1538fec7c7d8a5af2e73d3f06ea22f979f6560a9cc4acaf042a5fa\n'
       printf 'live_iso_url=https://github.com/lubuntu-team/calamares-settings-ubuntu.git\n'
       printf 'live_iso_branch=master\n'
       printf 'calamares_url=https://github.com/lubuntu-team/calamares-settings-ubuntu.git\n'

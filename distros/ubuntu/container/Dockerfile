@@ -24,6 +24,10 @@ RUN apt-get update -qq \
       grub-pc-bin \
       grub-efi-amd64-bin \
       grub-common \
+      p7zip-full \
+      libarchive-tools \
+      isolinux \
+      syslinux-utils \
       zstd \
       rsync \
       git \
