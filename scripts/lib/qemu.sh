@@ -32,7 +32,7 @@ qemu_target_iso_dir() {
   local out
   out="$(out_root)"
   case "$target" in
-    ubuntu) printf '%s\n' "$out/ubuntu" ;;
+    ubuntu) printf '%s\n' "$out/ubuntu/desktop" ;;
     cachyos-desktop) printf '%s\n' "$out/cachyos/desktop" ;;
     cachyos-handheld) printf '%s\n' "$out/cachyos/handheld" ;;
     *)
