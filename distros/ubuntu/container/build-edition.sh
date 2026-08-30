@@ -331,7 +331,10 @@ run_official_build() {
 
   # Enable parental services via symlinks in systemd multi-user target
   local wants_dir="$overlay_dir/etc/systemd/system/multi-user.target.wants"
-  mkdir -p "$wants_dir"
+  local graph_wants_dir="$overlay_dir/etc/systemd/system/graphical.target.wants"
+  mkdir -p "$wants_dir" "$graph_wants_dir"
+  ln -sfn "/usr/lib/systemd/system/gdm.service" "$overlay_dir/etc/systemd/system/display-manager.service"
+  ln -sfn "/usr/lib/systemd/system/gdm.service" "$graph_wants_dir/gdm.service"
   for unit in parental-guard.service parental-guard-agent.service parental-guard-enroll.service parental-guard-enroll.path; do
     if [[ -f "$overlay_dir/usr/lib/systemd/system/$unit" || -f "$overlay_dir/lib/systemd/system/$unit" ]]; then
       ln -sfn "/usr/lib/systemd/system/$unit" "$wants_dir/$unit"

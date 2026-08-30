@@ -59,7 +59,7 @@ QEMU_ARGS=(
   -serial mon:stdio
 )
 
-if [[ -f "$SEED_ISO" ]]; then
+if [[ "${PARENTAL_OS_ATTACH_SEED:-0}" == "1" && -f "$SEED_ISO" ]]; then
   QEMU_ARGS+=( -drive "file=$SEED_ISO,media=cdrom,readonly=on" )
 fi
 

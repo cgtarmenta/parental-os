@@ -61,8 +61,10 @@ ensure_out_dirs
 TARGET="$(qemu_require_single_target "${1:-ubuntu}")"
 ISO="$(qemu_iso_for_target "$TARGET")"
 OUT="$(out_root)"
-
-"$ROOT/scripts/make-cloud-init-seed.sh"
+# Interactive browser mode: do not attach cloud-init seed so installer runs in GUI wizard mode
+if [[ "${PARENTAL_OS_ATTACH_SEED:-0}" == "1" ]]; then
+  "$ROOT/scripts/make-cloud-init-seed.sh"
+fi
 
 export PARENTAL_OS_ISO_PATH="$ISO"
 export PARENTAL_OS_BROWSER_TARGET="$TARGET"
