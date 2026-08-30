@@ -343,3 +343,57 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "$PARENTAL_OS_OUT/ubuntu/staging/desktop" ]
 }
+
+# ---------------------------------------------------------------------------
+# Builder container contract & Dockerfile checks (Task 2)
+# ---------------------------------------------------------------------------
+
+skip_if_no_docker() {
+  command -v docker >/dev/null 2>&1 || skip "docker not available"
+  docker_cli info >/dev/null 2>&1 \
+    || skip "docker context $DOCKER_CONTEXT is unavailable"
+}
+
+@test "Ubuntu builder Dockerfile exists and uses ubuntu:noble base image" {
+  f="$TEST_ROOT/distros/ubuntu/container/Dockerfile"
+  [ -f "$f" ]
+  grep -Eq '^FROM[[:space:]]+ubuntu:noble' "$f"
+}
+
+@test "Ubuntu builder Dockerfile configures non-interactive debian frontend" {
+  f="$TEST_ROOT/distros/ubuntu/container/Dockerfile"
+  [ -f "$f" ]
+  grep -Eq 'DEBIAN_FRONTEND=noninteractive' "$f"
+}
+
+@test "Ubuntu builder Dockerfile installs required packaging and live ISO tools" {
+  f="$TEST_ROOT/distros/ubuntu/container/Dockerfile"
+  [ -f "$f" ]
+  for pkg in debootstrap squashfs-tools xorriso mtools dosfstools dpkg-dev debhelper rsync git jq; do
+    grep -q "$pkg" "$f"
+  done
+}
+
+@test "Ubuntu builder Dockerfile sets working directory to /build" {
+  f="$TEST_ROOT/distros/ubuntu/container/Dockerfile"
+  [ -f "$f" ]
+  grep -Eq '^WORKDIR[[:space:]]+/build' "$f"
+}
+
+@test "docker build succeeds for the Ubuntu builder image" {
+  skip_if_no_docker
+  f="$TEST_ROOT/distros/ubuntu/container/Dockerfile"
+  [ -f "$f" ]
+  run docker_cli build \
+    -t parental-os-ubuntu-builder:latest "$TEST_ROOT/distros/ubuntu/container"
+  [ "$status" -eq 0 ]
+}
+
+@test "builder image has required tools installed and functional" {
+  skip_if_no_docker
+  run docker_cli run --rm \
+    parental-os-ubuntu-builder:latest \
+    bash -c 'command -v debootstrap && command -v mksquashfs && command -v xorriso && command -v dpkg-buildpackage && command -v git && command -v jq && command -v python3'
+  [ "$status" -eq 0 ]
+}
+
