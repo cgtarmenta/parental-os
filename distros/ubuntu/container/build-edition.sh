@@ -304,137 +304,96 @@ run_official_build() {
     bsdtar -xf "$base_iso_path" -C "$iso_extracted" || xorriso -osirx on -indev "$base_iso_path" -extract / "$iso_extracted"
   fi
 
-  # Step 3: Extract all genuine desktop squashfs layers in dependency order into chroot_dir
-  log "Mounting and merging all genuine live desktop squashfs layers..."
-  local mount_tmp="$work_dir/mounts"
-  mkdir -p "$mount_tmp"
+  # Step 3: Build custom parental overlay layer on top of genuine Ubuntu layers
+  log "Building custom parental overlay layer (minimal.standard.live.custom.squashfs)..."
+  local overlay_dir="$work_dir/overlay-root"
+  rm -rf "$overlay_dir"
+  mkdir -p "$overlay_dir"
 
-  # Collect all layers in top-to-bottom order for overlayfs:
-  # 1. language and extra layers (top)
-  # 2. minimal.standard.live.squashfs
-  # 3. minimal.standard.squashfs
-  # 4. minimal.squashfs (bottom)
-  local all_layers=()
-  shopt -s nullglob
-  for layer in "$iso_extracted/casper"/*.squashfs; do
-    local bname="$(basename "$layer")"
-    if [[ "$bname" != "minimal.squashfs" && "$bname" != "minimal.standard.squashfs" && "$bname" != "minimal.standard.live.squashfs" ]]; then
-      all_layers+=("$layer")
-    fi
-  done
-  shopt -u nullglob
+  # Unpack parental-guard deb directly into overlay tree
+  local pg_deb
+  pg_deb="$(ls -1 "$PACKAGES_OUT"/parental-guard_*.deb 2>/dev/null | head -n1)"
+  [[ -n "$pg_deb" && -f "$pg_deb" ]] || die "parental-guard deb not found in $PACKAGES_OUT"
+  dpkg-deb -x "$pg_deb" "$overlay_dir/"
 
-  [[ -f "$iso_extracted/casper/minimal.standard.live.squashfs" ]] && all_layers+=("$iso_extracted/casper/minimal.standard.live.squashfs")
-  [[ -f "$iso_extracted/casper/minimal.standard.squashfs" ]] && all_layers+=("$iso_extracted/casper/minimal.standard.squashfs")
-  [[ -f "$iso_extracted/casper/minimal.squashfs" ]] && all_layers+=("$iso_extracted/casper/minimal.squashfs")
+  # Copy parental-guard deb into ISO casper directory so target installer can access it
+  cp -f "$pg_deb" "$iso_extracted/casper/parental-guard.deb"
 
-  local lower_str=""
-  local i=0
-  for layer in "${all_layers[@]}"; do
-    local mnt="$mount_tmp/layer_$i"
-    mkdir -p "$mnt"
-    log "  Extracting layer: $(basename "$layer")..."
-    unsquashfs -d "$mnt" "$layer" >/dev/null || die "failed to extract $layer"
-    if [[ -z "$lower_str" ]]; then
-      lower_str="$mnt"
-    else
-      lower_str="$lower_str:$mnt"
-    fi
-    i=$((i+1))
-  done
-
-  local merged_dir="$work_dir/merged"
-  local upper_dir="$work_dir/upper"
-  local work_cow="$work_dir/work-cow"
-  mkdir -p "$merged_dir" "$upper_dir" "$work_cow"
-
-  if mount -t overlay overlay -o "lowerdir=$lower_str,upperdir=$upper_dir,workdir=$work_cow" "$merged_dir" 2>/dev/null; then
-    log "Successfully mounted layered rootfs using kernel overlayfs"
-    cp -a "$merged_dir/." "$chroot_dir/"
-    umount -l "$merged_dir" 2>/dev/null || true
-  else
-    log "Overlayfs mount not supported in container, merging layers bottom-up..."
-    # Merge from bottom to top: last element in all_layers is minimal.squashfs (bottom)
-    for ((idx=${#all_layers[@]}-1; idx>=0; idx--)); do
-      local mnt="$mount_tmp/layer_$idx"
-      (cd "$mnt" && tar -cf - .) | (cd "$chroot_dir" && tar -xf -)
-    done
-  fi
-
-  rm -rf "$mount_tmp" "$upper_dir" "$work_cow" "$merged_dir"
-
-  # Step 4: Inject parental-guard and security configuration into live desktop chroot
-  log "Injecting parental-guard, security policies, and PAM gating into genuine desktop rootfs..."
-
-  # Mount pseudo-filesystems
-  mount -t proc proc "$chroot_dir/proc"
-  mount -t sysfs sys "$chroot_dir/sys"
-  mount --bind /dev "$chroot_dir/dev"
-  mount --bind /dev/pts "$chroot_dir/dev/pts"
-
-  cleanup_chroot_mounts() {
-    umount -lf "$chroot_dir/proc" 2>/dev/null || true
-    umount -lf "$chroot_dir/sys" 2>/dev/null || true
-    umount -lf "$chroot_dir/dev/pts" 2>/dev/null || true
-    umount -lf "$chroot_dir/dev" 2>/dev/null || true
-  }
-  trap cleanup_chroot_mounts EXIT
-
-  # Copy parental-guard .deb into chroot and install it
-  mkdir -p "$chroot_dir/tmp"
-  cp -f "$PACKAGES_OUT"/parental-guard_*.deb "$chroot_dir/tmp/parental-guard.deb"
-  chroot "$chroot_dir" env DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/parental-guard.deb || true
-  rm -f "$chroot_dir/tmp/parental-guard.deb"
-
-  # Copy local repo into live /srv/parental-os-repo so installer can deploy to target
-  mkdir -p "$chroot_dir/srv/parental-os-repo"
-  cp -a /srv/parental-os-repo/. "$chroot_dir/srv/parental-os-repo/"
+  # Copy local repo into overlay /srv/parental-os-repo
+  mkdir -p "$overlay_dir/srv/parental-os-repo"
+  cp -a /srv/parental-os-repo/. "$overlay_dir/srv/parental-os-repo/"
 
   # Merge staged airootfs overlay if present
   if [[ -d "$staged_dir/airootfs" ]]; then
-    log "Applying staged airootfs overlay to genuine live rootfs..."
-    cp -a "$staged_dir/airootfs/." "$chroot_dir/"
+    log "Applying staged airootfs overlay to custom layer..."
+    cp -a "$staged_dir/airootfs/." "$overlay_dir/"
   fi
 
-  # Ensure all 4 parental units are enabled in chroot
-  local wants_dir="$chroot_dir/etc/systemd/system/multi-user.target.wants"
+  # Enable parental services via symlinks in systemd multi-user target
+  local wants_dir="$overlay_dir/etc/systemd/system/multi-user.target.wants"
   mkdir -p "$wants_dir"
   for unit in parental-guard.service parental-guard-agent.service parental-guard-enroll.service parental-guard-enroll.path; do
-    if [[ -f "$chroot_dir/usr/lib/systemd/system/$unit" || -f "$chroot_dir/lib/systemd/system/$unit" ]]; then
-      ln -sfn "/lib/systemd/system/$unit" "$wants_dir/$unit"
+    if [[ -f "$overlay_dir/usr/lib/systemd/system/$unit" || -f "$overlay_dir/lib/systemd/system/$unit" ]]; then
+      ln -sfn "/usr/lib/systemd/system/$unit" "$wants_dir/$unit"
     fi
   done
 
-  # Unmount pseudo filesystems
-  cleanup_chroot_mounts
-  trap - EXIT
+  # Inject target installer watcher to guarantee parental-guard is installed on target system
+  mkdir -p "$overlay_dir/usr/lib/parental-os" "$overlay_dir/usr/lib/systemd/system" "$overlay_dir/lib/systemd/system"
+  cat > "$overlay_dir/usr/lib/parental-os/target-installer.sh" <<'TARGET_EOF'
+#!/bin/bash
+set -euo pipefail
+# Wait for target system installation by subiquity / curtin
+while true; do
+  if [[ -f /target/etc/passwd && -f /target/etc/os-release ]]; then
+    if [[ ! -f /target/var/lib/parental-os/.installed ]]; then
+      sleep 2
+      if [[ -f /cdrom/casper/parental-guard.deb ]]; then
+        cp /cdrom/casper/parental-guard.deb /target/tmp/parental-guard.deb
+        chroot /target dpkg -i /tmp/parental-guard.deb 2>/dev/null || true
+        rm -f /target/tmp/parental-guard.deb
+        mkdir -p /target/var/lib/parental-os
+        touch /target/var/lib/parental-os/.installed
+      fi
+    fi
+  fi
+  sleep 3
+done
+TARGET_EOF
+  chmod 755 "$overlay_dir/usr/lib/parental-os/target-installer.sh"
 
-  # Step 5: Re-pack unified filesystem.squashfs and clean up fragmented layers
-  log "Compressing unified genuine live desktop filesystem.squashfs..."
-  rm -f "$iso_extracted/casper"/*.squashfs
-  mksquashfs "$chroot_dir" "$iso_extracted/casper/filesystem.squashfs" -comp xz -noappend -b 1048576 2>&1 | tee -a "$staged_dir/out/squashfs.log" || true
+  cat > "$overlay_dir/usr/lib/systemd/system/parental-target-installer.service" <<'UNIT_EOF'
+[Unit]
+Description=Parental OS Target System Provisioner
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/parental-os/target-installer.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+  ln -sfn "/usr/lib/systemd/system/parental-target-installer.service" "$wants_dir/parental-target-installer.service"
+
+  # Step 4: Compress custom overlay layer
+  log "Compressing custom overlay layer to casper/minimal.standard.live.custom.squashfs..."
+  local custom_squash="$iso_extracted/casper/minimal.standard.live.custom.squashfs"
+  rm -f "$custom_squash"
+  mksquashfs "$overlay_dir" "$custom_squash" -comp xz -noappend -b 1048576 2>&1 | tee -a "$staged_dir/out/squashfs.log" || true
   
-  # Provide compatibility link for minimal.squashfs
-  cp -l "$iso_extracted/casper/filesystem.squashfs" "$iso_extracted/casper/minimal.squashfs" 2>/dev/null || \
-    ln -s "filesystem.squashfs" "$iso_extracted/casper/minimal.squashfs" 2>/dev/null || true
+  local custom_size
+  custom_size="$(du -sx --block-size=1 "$overlay_dir" 2>/dev/null | cut -f1)"
+  printf '%s\n' "$custom_size" > "$iso_extracted/casper/minimal.standard.live.custom.size"
+  rm -rf "$overlay_dir"
 
-  # Update size files for casper
-  local uncompressed_size
-  uncompressed_size="$(du -sx --block-size=1 "$chroot_dir" 2>/dev/null | cut -f1)"
-  printf '%s\n' "$uncompressed_size" > "$iso_extracted/casper/filesystem.size"
-  printf '%s\n' "$uncompressed_size" > "$iso_extracted/casper/minimal.size"
-
-  # Clean up obsolete layer manifest and size files
-  find "$iso_extracted/casper" -type f \( -name "minimal.*.manifest*" -o -name "minimal.*.size" \) -delete 2>/dev/null || true
-
-  # Clean work chroot to free space
-  rm -rf "$chroot_dir"
-
-  # Update GRUB configuration to point layerfs-path directly to unified filesystem.squashfs
-  log "Updating GRUB configuration with layerfs-path=filesystem.squashfs..."
+  # Step 5: Update GRUB configuration with layerfs-path=minimal.standard.live.custom.squashfs
+  log "Updating GRUB configuration with layerfs-path=minimal.standard.live.custom.squashfs..."
   for grub_file in "$iso_extracted/boot/grub/grub.cfg" "$iso_extracted/boot/grub/loopback.cfg"; do
     if [[ -f "$grub_file" ]]; then
-      sed -i 's|/casper/vmlinuz\([ \t]\+\)|/casper/vmlinuz layerfs-path=filesystem.squashfs\1|g' "$grub_file"
+      sed -i 's|/casper/vmlinuz\([ \t]\+\)|/casper/vmlinuz layerfs-path=minimal.standard.live.custom.squashfs\1|g' "$grub_file"
     fi
   done
 
