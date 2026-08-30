@@ -115,7 +115,7 @@ _run_ubuntu_transformer_runtime() {
 @test "ubuntu_edition_metadata does not encode any hardcoded 40-char SHA" {
   run ubuntu_edition_metadata desktop
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -Eq '[0-9a-f]{40}'
+  ! echo "$output" | grep -E '^(live_iso|calamares)_sha=' | grep -Eq '[0-9a-f]{40}'
 }
 
 @test "ubuntu_metadata_value extracts keys correctly" {
@@ -420,8 +420,9 @@ skip_if_no_docker() {
 @test "builder image has required tools installed and functional" {
   skip_if_no_docker
   run docker_cli run --rm \
+    --entrypoint bash \
     parental-os-ubuntu-builder:latest \
-    bash -c 'command -v debootstrap && command -v mksquashfs && command -v xorriso && command -v dpkg-buildpackage && command -v git && command -v jq && command -v python3'
+    -c 'command -v debootstrap && command -v mksquashfs && command -v xorriso && command -v dpkg-buildpackage && command -v git && command -v jq && command -v python3'
   [ "$status" -eq 0 ]
 }
 

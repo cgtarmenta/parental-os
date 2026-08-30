@@ -87,15 +87,18 @@ fi
 # Copy the binary .deb and the source .dsc into out/packages.
 shopt -s nullglob
 copied=0
+mkdir -p "$DEB_OUT"
 for f in "$STAGE_PARENT"/parental-guard_*.deb; do
-  cp -a "$f" "$DEB_OUT/"
+  rm -f "$DEB_OUT/$(basename "$f")"
+  cp -f "$f" "$DEB_OUT/"
   copied=1
 done
 if [[ "$copied" -eq 0 ]]; then
   die "no parental-guard_*.deb produced under $STAGE_PARENT"
 fi
 for f in "$STAGE_PARENT"/parental-guard_*.dsc; do
-  cp -a "$f" "$DEB_OUT/"
+  rm -f "$DEB_OUT/$(basename "$f")"
+  cp -f "$f" "$DEB_OUT/"
 done
 log "deb package(s) in out/packages:"
 ls -la "$DEB_OUT"/parental-guard_* >&2 || true

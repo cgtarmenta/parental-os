@@ -32,7 +32,13 @@ qemu_target_iso_dir() {
   local out
   out="$(out_root)"
   case "$target" in
-    ubuntu) printf '%s\n' "$out/ubuntu/desktop" ;;
+    ubuntu)
+      if [[ -d "$out/ubuntu/desktop" ]]; then
+        printf '%s\n' "$out/ubuntu/desktop"
+      else
+        printf '%s\n' "$out/ubuntu"
+      fi
+      ;;
     cachyos-desktop) printf '%s\n' "$out/cachyos/desktop" ;;
     cachyos-handheld) printf '%s\n' "$out/cachyos/handheld" ;;
     *)
@@ -54,6 +60,9 @@ qemu_iso_for_target() {
   local files=("$dir"/*.iso)
   if [[ "${#files[@]}" -eq 0 && -d "$dir/desktop" ]]; then
     files=("$dir/desktop"/*.iso)
+  fi
+  if [[ "${#files[@]}" -eq 0 && "$target" = "ubuntu" && -d "$(dirname "$dir")" ]]; then
+    files=("$(dirname "$dir")"/*.iso)
   fi
   if [[ "$nullglob_was_set" -eq 0 ]]; then
     shopt -u nullglob

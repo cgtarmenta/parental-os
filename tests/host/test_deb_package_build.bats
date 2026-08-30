@@ -17,12 +17,14 @@ setup_file() {
   export DOCKER_CONTEXT="${DOCKER_CONTEXT:-default}"
   export DEB="$TEST_ROOT/out/packages/parental-guard_0.1.0-1_all.deb"
   export STAGE_PARENT="$TEST_ROOT/out/deb-src"
-  if ! command -v docker >/dev/null 2>&1; then
-    return 0
-  fi
   # Build once for the whole file; the build script cleans and re-stages.
-  run "$TEST_ROOT/scripts/build-parental-guard-deb.sh"
-  export DEB_BUILD_STATUS="$status"
+  mkdir -p "$TEST_ROOT/out"
+  rm -f "$TEST_ROOT/out/deb-build-status.txt"
+  if "$TEST_ROOT/scripts/build-parental-guard-deb.sh"; then
+    echo "0" > "$TEST_ROOT/out/deb-build-status.txt"
+  else
+    echo "1" > "$TEST_ROOT/out/deb-build-status.txt"
+  fi
 }
 
 setup() {
@@ -39,7 +41,8 @@ skip_if_no_docker() {
 bats_test_function --description "docker build produces exact artifact parental-guard_0.1.0-1_all.deb" -- deb_build_produces_exact_artifact
 deb_build_produces_exact_artifact() {
   skip_if_no_docker
-  [ "${DEB_BUILD_STATUS:-1}" -eq 0 ]
+  [ -f "$PARENTAL_OS_ROOT/out/deb-build-status.txt" ]
+  [ "$(<"$PARENTAL_OS_ROOT/out/deb-build-status.txt")" -eq 0 ]
   [ -f "$DEB" ]
 }
 

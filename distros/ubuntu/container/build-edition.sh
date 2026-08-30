@@ -303,6 +303,7 @@ run_official_build() {
   else
     bsdtar -xf "$base_iso_path" -C "$iso_extracted" || xorriso -osirx on -indev "$base_iso_path" -extract / "$iso_extracted"
   fi
+  chmod -R ugo+rwX "$iso_extracted" 2>/dev/null || true
 
   # Step 3: Build custom parental overlay layer on top of genuine Ubuntu layers
   log "Building custom parental overlay layer (minimal.standard.live.custom.squashfs)..."
