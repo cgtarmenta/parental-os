@@ -329,6 +329,23 @@ run_official_build() {
     cp -a "$staged_dir/airootfs/." "$overlay_dir/"
   fi
 
+  # Ensure GDM uses Xorg fallback and autologins live desktop session cleanly
+  mkdir -p "$overlay_dir/etc/gdm3"
+  cat > "$overlay_dir/etc/gdm3/custom.conf" <<'GDM_EOF'
+[daemon]
+WaylandEnable=false
+AutomaticLoginEnable=True
+AutomaticLogin=ubuntu
+
+[security]
+
+[xdmcp]
+
+[chooser]
+
+[debug]
+GDM_EOF
+
   # Enable parental services via symlinks in systemd multi-user target
   local wants_dir="$overlay_dir/etc/systemd/system/multi-user.target.wants"
   mkdir -p "$wants_dir"
