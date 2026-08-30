@@ -278,7 +278,10 @@ def install_target_pkg_installer(calamares_src_dir: Path) -> None:
         "fi\n"
         "for svc in parental-guard.service parental-guard-agent.service parental-guard-enroll.service parental-guard-enroll.path; do\n"
         '  run_chroot systemctl enable "$svc" 2>/dev/null || true\n'
-        "done\n",
+        "done\n"
+        'if [[ -x "${prefix}/usr/lib/parental-os/enroll-users.sh" ]]; then\n'
+        '  run_chroot /usr/lib/parental-os/enroll-users.sh 2>/dev/null || true\n'
+        "fi\n",
         encoding="utf-8",
     )
     install_script.chmod(0o755)
