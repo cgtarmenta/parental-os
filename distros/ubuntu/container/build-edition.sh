@@ -392,11 +392,23 @@ UNIT_EOF
   printf '%s\n' "$custom_size" > "$iso_extracted/casper/minimal.standard.live.custom.size"
   rm -rf "$overlay_dir"
 
-  # Step 5: Update GRUB configuration with layerfs-path=minimal.standard.live.custom.squashfs
-  log "Updating GRUB configuration with layerfs-path=minimal.standard.live.custom.squashfs..."
+  # Step 5: Update GRUB configuration with custom layer, noprompt, and Boot from Hard Disk option
+  log "Updating GRUB configuration with custom layer, noprompt, and hard disk boot option..."
   for grub_file in "$iso_extracted/boot/grub/grub.cfg" "$iso_extracted/boot/grub/loopback.cfg"; do
     if [[ -f "$grub_file" ]]; then
-      sed -i 's|/casper/vmlinuz\([ \t]\+\)|/casper/vmlinuz layerfs-path=minimal.standard.live.custom.squashfs\1|g' "$grub_file"
+      sed -i 's|/casper/vmlinuz\([ \t]\+\)|/casper/vmlinuz layerfs-path=minimal.standard.live.custom.squashfs noprompt\1|g' "$grub_file"
+      cat >> "$grub_file" <<'GRUB_HD_EOF'
+
+menuentry "Boot from Hard Disk" --id "harddisk" {
+    insmod part_gpt
+    insmod part_msdos
+    insmod chain
+    insmod ext2
+    insmod fat
+    set root=(hd0)
+    chainloader +1 || exit 1
+}
+GRUB_HD_EOF
     fi
   done
 

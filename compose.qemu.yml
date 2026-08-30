@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     environment:
       PARENTAL_OS_ISO: /iso/boot.iso
+      PARENTAL_OS_BOOT_FROM: ${PARENTAL_OS_BOOT_FROM:-iso}
       PARENTAL_OS_QEMU_RAM: ${PARENTAL_OS_QEMU_RAM:-4096}
       PARENTAL_OS_QEMU_CPUS: ${PARENTAL_OS_QEMU_CPUS:-2}
       PARENTAL_OS_QEMU_DISK_SIZE: ${PARENTAL_OS_QEMU_DISK_SIZE:-20G}

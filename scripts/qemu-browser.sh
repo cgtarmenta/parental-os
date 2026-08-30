@@ -51,14 +51,25 @@ if [[ "${1:-}" == "down" ]]; then
   exit 0
 fi
 
-if [[ "$#" -gt 1 ]]; then
-  die "qemu-browser requires a single ISO target: use ubuntu|cachyos-desktop|cachyos-handheld"
-fi
+BOOT_FROM="${PARENTAL_OS_BOOT_FROM:-iso}"
+TARGET_ARG=""
+for arg in "$@"; do
+  case "$arg" in
+    --boot-disk|--disk|disk)
+      BOOT_FROM="disk"
+      ;;
+    *)
+      if [[ -z "$TARGET_ARG" ]]; then
+        TARGET_ARG="$arg"
+      fi
+      ;;
+  esac
+done
 
 require_cmd docker
 ensure_out_dirs
 
-TARGET="$(qemu_require_single_target "${1:-ubuntu}")"
+TARGET="$(qemu_require_single_target "${TARGET_ARG:-ubuntu}")"
 ISO="$(qemu_iso_for_target "$TARGET")"
 OUT="$(out_root)"
 # Interactive browser mode: do not attach cloud-init seed so installer runs in GUI wizard mode
@@ -66,6 +77,7 @@ if [[ "${PARENTAL_OS_ATTACH_SEED:-0}" == "1" ]]; then
   "$ROOT/scripts/make-cloud-init-seed.sh"
 fi
 
+export PARENTAL_OS_BOOT_FROM="$BOOT_FROM"
 export PARENTAL_OS_ISO_PATH="$ISO"
 export PARENTAL_OS_BROWSER_TARGET="$TARGET"
 export PARENTAL_OS_BIND_IP="${PARENTAL_OS_BIND_IP:-127.0.0.1}"

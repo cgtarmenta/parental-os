@@ -43,14 +43,18 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
+BOOT_ORDER="order=dc,menu=on"
+if [[ "${PARENTAL_OS_BOOT_FROM:-}" == "disk" ]]; then
+  BOOT_ORDER="order=c,menu=on"
+fi
+
 QEMU_ARGS=(
   -machine "q35,accel=$ACCEL"
   -cpu "$CPU"
   -m "$RAM"
   -smp "$CPUS"
-  -boot d
+  -boot "$BOOT_ORDER"
   -drive "file=$DISK,if=virtio,format=qcow2"
-  -cdrom "$PARENTAL_OS_ISO"
   -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22"
   -device virtio-net-pci,netdev=net0
   -vga virtio
@@ -58,6 +62,10 @@ QEMU_ARGS=(
   -vnc 127.0.0.1:0
   -serial mon:stdio
 )
+
+if [[ -f "$PARENTAL_OS_ISO" && "$PARENTAL_OS_ISO" != "/dev/null" && "${PARENTAL_OS_BOOT_FROM:-}" != "disk" ]]; then
+  QEMU_ARGS+=( -cdrom "$PARENTAL_OS_ISO" )
+fi
 
 if [[ "${PARENTAL_OS_ATTACH_SEED:-0}" == "1" && -f "$SEED_ISO" ]]; then
   QEMU_ARGS+=( -drive "file=$SEED_ISO,media=cdrom,readonly=on" )
