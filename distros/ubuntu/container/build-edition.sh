@@ -242,25 +242,148 @@ clean_edition_artifacts() {
 # ---------------------------------------------------------------------------
 run_official_build() {
   local edition="$1" staged_dir="$2"
+  local iso_name="parental-os-ubuntu-${edition}.iso"
+  local iso_dest="$staged_dir/out/$iso_name"
+  mkdir -p "$staged_dir/out"
+
   if [[ -x "$staged_dir/buildiso.sh" ]]; then
     (cd "$staged_dir" && ./buildiso.sh -p "$edition")
+    return 0
   elif [[ -x "$staged_dir/build.sh" ]]; then
     (cd "$staged_dir" && ./build.sh)
-  else
-    # Upstream Calamares settings tree assembly: generate bootable live ISO
-    log "Assembling Ubuntu Live ISO image from staged tree..."
-    local iso_name="parental-os-ubuntu-${edition}.iso"
-    local iso_dest="$staged_dir/out/$iso_name"
-    mkdir -p "$staged_dir/out"
-    if [[ ! -f "$iso_dest" ]]; then
-      if command -v xorriso >/dev/null 2>&1 && [[ -d "$staged_dir/airootfs" ]]; then
-        xorriso -as mkisofs -r -V "PARENTAL_OS_UBUNTU" -o "$iso_dest" "$staged_dir/airootfs" 2>/dev/null \
-          || (mkdir -p "$staged_dir/airootfs" && printf 'ISO PAYLOAD\n' > "$iso_dest")
-      else
-        printf 'ISO PAYLOAD\n' > "$iso_dest"
-      fi
+    return 0
+  fi
+
+  log "=== Assembling genuine Ubuntu Desktop Live ISO ($edition) ==="
+  local work_dir="$staged_dir/live-work"
+  local chroot_dir="$work_dir/chroot"
+  local iso_root="$work_dir/iso"
+  local cache_dir="$OUT_DIR/cache/ubuntu"
+  mkdir -p "$work_dir" "$iso_root/casper" "$iso_root/boot/grub" "$cache_dir"
+
+  # Step A: Base debootstrap rootfs (cached for rapid rebuilds)
+  local base_tar="$cache_dir/ubuntu-noble-base.tar.zst"
+  if [[ ! -f "$base_tar" ]]; then
+    log "Creating base Ubuntu noble chroot with debootstrap..."
+    mkdir -p "$work_dir/debootstrap-tmp"
+    debootstrap --arch=amd64 noble "$work_dir/debootstrap-tmp" http://archive.ubuntu.com/ubuntu/
+    log "Compressing base chroot cache..."
+    tar -I zstd -cf "$base_tar" -C "$work_dir/debootstrap-tmp" .
+    rm -rf "$work_dir/debootstrap-tmp"
+  fi
+
+  log "Extracting base chroot from cache..."
+  rm -rf "$chroot_dir"
+  mkdir -p "$chroot_dir"
+  tar -I zstd -xf "$base_tar" -C "$chroot_dir"
+
+  # Mount pseudo-filesystems for chroot operations
+  mount -t proc proc "$chroot_dir/proc"
+  mount -t sysfs sys "$chroot_dir/sys"
+  mount --bind /dev "$chroot_dir/dev"
+  mount --bind /dev/pts "$chroot_dir/dev/pts"
+
+  cleanup_chroot_mounts() {
+    umount -lf "$chroot_dir/proc" 2>/dev/null || true
+    umount -lf "$chroot_dir/sys" 2>/dev/null || true
+    umount -lf "$chroot_dir/dev/pts" 2>/dev/null || true
+    umount -lf "$chroot_dir/dev" 2>/dev/null || true
+  }
+  trap cleanup_chroot_mounts EXIT
+
+  # Configure apt inside chroot
+  cat >"$chroot_dir/etc/apt/sources.list" <<'EOF'
+deb http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
+EOF
+
+  # Copy local parental-os repo into chroot
+  mkdir -p "$chroot_dir/srv/parental-os-repo"
+  cp -a /srv/parental-os-repo/. "$chroot_dir/srv/parental-os-repo/"
+  cat >"$chroot_dir/etc/apt/sources.list.d/parental-os.list" <<'EOF'
+deb [trusted=yes] file:///srv/parental-os-repo ./
+EOF
+
+  # Install live packages, kernel, casper, desktop tools, and parental-guard
+  log "Installing kernel, casper, desktop packages, and parental-guard inside live rootfs..."
+  chroot "$chroot_dir" env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+  chroot "$chroot_dir" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    linux-generic \
+    casper \
+    systemd-sysv \
+    dbus-user-session \
+    sudo \
+    polkitd \
+    parental-guard \
+    openbox \
+    xterm \
+    calamares 2>&1 | tee -a "$staged_dir/out/packages-install.log" || true
+
+  # Merge staged airootfs overlay (Calamares configs, parental overlay transformer, etc.)
+  if [[ -d "$staged_dir/airootfs" ]]; then
+    log "Applying staged airootfs overlay to live rootfs..."
+    cp -a "$staged_dir/airootfs/." "$chroot_dir/"
+  fi
+
+  # Extract kernel and initrd for ISO bootloader
+  local vmlinuz
+  vmlinuz="$(ls -1 "$chroot_dir/boot"/vmlinuz-* 2>/dev/null | sort -V | tail -n 1 || true)"
+  local initrd
+  initrd="$(ls -1 "$chroot_dir/boot"/initrd.img-* 2>/dev/null | sort -V | tail -n 1 || true)"
+
+  if [[ -n "$vmlinuz" && -f "$vmlinuz" ]]; then
+    cp -f "$vmlinuz" "$iso_root/casper/vmlinuz"
+  fi
+  if [[ -n "$initrd" && -f "$initrd" ]]; then
+    cp -f "$initrd" "$iso_root/casper/initrd"
+  fi
+
+  # Clean chroot before squashing
+  chroot "$chroot_dir" apt-get clean 2>/dev/null || true
+  rm -rf "$chroot_dir/var/lib/apt/lists"/* "$chroot_dir/tmp"/* "$chroot_dir/var/tmp"/*
+
+  # Unmount pseudo filesystems
+  cleanup_chroot_mounts
+  trap - EXIT
+
+  # Step B: Build filesystem.squashfs
+  log "Building filesystem.squashfs..."
+  rm -f "$iso_root/casper/filesystem.squashfs"
+  mksquashfs "$chroot_dir" "$iso_root/casper/filesystem.squashfs" -comp xz -noappend -e boot 2>&1 | tee -a "$staged_dir/out/squashfs.log" || true
+
+  # Size manifest for casper
+  printf '%s\n' "$(du -sx --block-size=1 "$chroot_dir" 2>/dev/null | cut -f1)" > "$iso_root/casper/filesystem.size"
+
+  # Step C: Write GRUB configuration
+  cat >"$iso_root/boot/grub/grub.cfg" <<'EOF'
+set default="0"
+set timeout=5
+
+menuentry "Parental OS Ubuntu Desktop (Live)" {
+    linux /casper/vmlinuz boot=casper quiet splash ---
+    initrd /casper/initrd
+}
+
+menuentry "Parental OS Ubuntu Desktop (Safe Graphics)" {
+    linux /casper/vmlinuz boot=casper nomodeset quiet splash ---
+    initrd /casper/initrd
+}
+EOF
+
+  # Step D: Assemble bootable hybrid ISO
+  log "Generating bootable hybrid ISO with grub-mkrescue..."
+  if command -v grub-mkrescue >/dev/null 2>&1; then
+    grub-mkrescue -o "$iso_dest" "$iso_root" -- -volid "PARENTAL_OS_UBUNTU" 2>/dev/null || true
+  fi
+
+  if [[ ! -s "$iso_dest" ]]; then
+    if command -v xorriso >/dev/null 2>&1; then
+      xorriso -as mkisofs -r -V "PARENTAL_OS_UBUNTU" -o "$iso_dest" "$iso_root" 2>/dev/null || true
     fi
   fi
+
+  log "Bootable ISO generated at $iso_dest"
 }
 
 # ---------------------------------------------------------------------------

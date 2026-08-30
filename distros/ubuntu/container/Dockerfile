@@ -23,6 +23,8 @@ RUN apt-get update -qq \
       e2fsprogs \
       grub-pc-bin \
       grub-efi-amd64-bin \
+      grub-common \
+      zstd \
       rsync \
       git \
       jq \
