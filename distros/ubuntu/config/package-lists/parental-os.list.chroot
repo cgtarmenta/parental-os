@@ -1,6 +1,0 @@
-cloud-init
-openssh-server
-policykit-1
-python3
-qemu-guest-agent
-sudo
