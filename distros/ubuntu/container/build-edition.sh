@@ -256,8 +256,8 @@ run_official_build() {
   official_iso_sha256="$(ubuntu_metadata_value "$edition" official_iso_sha256 || true)"
 
   if [[ -z "$official_iso_url" ]]; then
-    official_iso_url="https://cdimage.ubuntu.com/lubuntu/releases/24.04/release/lubuntu-24.04.4-desktop-amd64.iso"
-    official_iso_sha256="5ca3ab769f1538fec7c7d8a5af2e73d3f06ea22f979f6560a9cc4acaf042a5fa"
+    official_iso_url="http://mirror.plusserver.com/ubuntu/releases/26.04/ubuntu-26.04.1-desktop-amd64.iso"
+    official_iso_sha256="601e30fbf5d97759367c632e2c33630665039b7e2158fd068403da3ccf1bda1f"
   fi
 
   local cache_dir="$OUT_DIR/cache/ubuntu"
@@ -266,22 +266,28 @@ run_official_build() {
   base_iso_name="$(basename "$official_iso_url")"
   local base_iso_path="$cache_dir/$base_iso_name"
 
-  # Step 1: Ensure official Desktop Live ISO is downloaded and cached
-  if [[ ! -f "$base_iso_path" ]]; then
-    log "Downloading official Ubuntu Desktop Live ISO from $official_iso_url..."
-    curl -fL -C - -o "$base_iso_path" "$official_iso_url" || die "failed to download official ISO"
-  fi
-
-  if [[ -n "$official_iso_sha256" ]]; then
-    log "Verifying official ISO SHA256..."
-    local actual_sha
-    actual_sha="$(sha256sum "$base_iso_path" | awk '{print $1}')"
-    if [[ "$actual_sha" != "$official_iso_sha256" ]]; then
-      log "Warning: SHA mismatch (expected $official_iso_sha256, got $actual_sha)."
-    else
-      log "Official ISO SHA256 verified: $actual_sha"
+  # Step 1: Ensure official Desktop Live ISO is downloaded and verified
+  while true; do
+    if [[ -f "$base_iso_path" ]]; then
+      if [[ -n "$official_iso_sha256" ]]; then
+        log "Verifying official ISO SHA256..."
+        local actual_sha
+        actual_sha="$(sha256sum "$base_iso_path" | awk '{print $1}')"
+        if [[ "$actual_sha" = "$official_iso_sha256" ]]; then
+          log "Official ISO SHA256 verified: $actual_sha"
+          break
+        fi
+        log "SHA mismatch (expected $official_iso_sha256, got $actual_sha). Resuming download..."
+      else
+        break
+      fi
     fi
-  fi
+    log "Downloading official Ubuntu Desktop Live ISO from $official_iso_url..."
+    curl -fL -C - -o "$base_iso_path" "$official_iso_url" || {
+      log "Download interrupted, retrying..."
+      sleep 2
+    }
+  done
 
   log "=== Reconstructing genuine Ubuntu Desktop Live ISO ($edition) from official ISO ==="
   local work_dir="$staged_dir/live-work"
@@ -299,10 +305,24 @@ run_official_build() {
   fi
 
   # Step 3: Extract the genuine desktop squashfs
-  local squashfs_file="$iso_extracted/casper/filesystem.squashfs"
-  [[ -f "$squashfs_file" ]] || die "filesystem.squashfs not found in official ISO at $squashfs_file"
+  local squashfs_file=""
+  if [[ -f "$iso_extracted/casper/filesystem.squashfs" ]]; then
+    squashfs_file="$iso_extracted/casper/filesystem.squashfs"
+  elif [[ -f "$iso_extracted/casper/minimal.squashfs" ]]; then
+    squashfs_file="$iso_extracted/casper/minimal.squashfs"
+  elif [[ -f "$iso_extracted/casper/ubuntu-desktop-minimal.squashfs" ]]; then
+    squashfs_file="$iso_extracted/casper/ubuntu-desktop-minimal.squashfs"
+  else
+    shopt -s nullglob
+    local found_squash=("$iso_extracted/casper"/*.squashfs)
+    shopt -u nullglob
+    if [[ "${#found_squash[@]}" -gt 0 ]]; then
+      squashfs_file="${found_squash[0]}"
+    fi
+  fi
+  [[ -n "$squashfs_file" && -f "$squashfs_file" ]] || die "no squashfs found in official ISO at $iso_extracted/casper"
 
-  log "Extracting genuine live desktop filesystem.squashfs..."
+  log "Extracting genuine live desktop squashfs ($squashfs_file)..."
   unsquashfs -d "$chroot_dir" -f "$squashfs_file" >/dev/null || die "failed to extract squashfs"
 
   # Step 4: Inject parental-guard and security configuration into live desktop chroot
