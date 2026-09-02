@@ -56,12 +56,24 @@ login_def() {
 UID_MIN="$(login_def UID_MIN 1000)"
 UID_MAX="$(login_def UID_MAX 60000)"
 
+is_live_media() {
+  [[ -z "$ROOT_FS" ]] && [[ -d /run/casper || -d /run/archiso || -d /run/live || -f /run/live/medium ]]
+}
+
 # An account is interactive when its UID falls in the human range and its shell is
 # a real one. Shell *identity* is never used to decide this -- fish, zsh and bash
 # are equally real -- only the explicit refusal shells are excluded.
+# Live installer session users (e.g. ubuntu, casper) are excluded on live media so
+# the GUI installer has full permissions to manage disks and system units.
 interactive_users() {
-  awk -F: -v min="$UID_MIN" -v max="$UID_MAX" '
+  local is_live="0"
+  if is_live_media; then
+    is_live="1"
+  fi
+
+  awk -F: -v min="$UID_MIN" -v max="$UID_MAX" -v is_live="$is_live" '
     $1 == "root" { next }
+    is_live == "1" && ($1 == "ubuntu" || $1 == "casper" || $1 == "live" || $1 == "archiso" || $1 == "cachyos") { next }
     $3 < min || $3 > max { next }
     {
       shell = $7

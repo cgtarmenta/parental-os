@@ -63,10 +63,9 @@ deb_contains_expected_payload() {
   [[ "$output" == *"/usr/lib/parental-os/agent/server.py"* ]]
   [[ "$output" == *"/usr/lib/parental-os/first-login.sh"* ]]
   [[ "$output" == *"/usr/lib/parental-os/user-setup.sh"* ]]
-  # Systemd units ship at /lib/systemd/system (Debian-standard path; on
-  # merged-/usr Bookworm this resolves to /usr/lib/systemd/system).
-  [[ "$output" == *"/lib/systemd/system/parental-guard.service"* ]]
-  [[ "$output" == *"/lib/systemd/system/parental-guard-agent.service"* ]]
+  # Systemd units ship under /usr/lib/systemd/system or /lib/systemd/system
+  [[ "$output" == *"/systemd/system/parental-guard.service"* ]]
+  [[ "$output" == *"/systemd/system/parental-guard-agent.service"* ]]
   [[ "$output" != *"/usr/etc/"* ]]
 }
 

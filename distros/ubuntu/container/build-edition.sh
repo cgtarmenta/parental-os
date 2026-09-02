@@ -246,6 +246,11 @@ run_official_build() {
   local iso_dest="$staged_dir/out/$iso_name"
   mkdir -p "$staged_dir/out"
 
+  if [[ -f "$iso_dest" ]]; then
+    log "Using pre-staged ISO at $iso_dest"
+    return 0
+  fi
+
   if [[ -x "$staged_dir/buildiso.sh" ]]; then
     (cd "$staged_dir" && ./buildiso.sh -p "$edition")
     return 0
@@ -317,12 +322,16 @@ run_official_build() {
   [[ -n "$pg_deb" && -f "$pg_deb" ]] || die "parental-guard deb not found in $PACKAGES_OUT"
   dpkg-deb -x "$pg_deb" "$overlay_dir/"
 
-  # Copy parental-guard deb into ISO casper directory so target installer can access it
+  # Retain deb package at /usr/share/parental-os/ and /cdrom/casper/ for target installation
+  mkdir -p "$overlay_dir/usr/share/parental-os"
+  cp -f "$pg_deb" "$overlay_dir/usr/share/parental-os/parental-guard.deb"
   cp -f "$pg_deb" "$iso_extracted/casper/parental-guard.deb"
 
   # Copy local repo into overlay /srv/parental-os-repo
   mkdir -p "$overlay_dir/srv/parental-os-repo"
-  cp -a /srv/parental-os-repo/. "$overlay_dir/srv/parental-os-repo/"
+  if [[ -d /srv/parental-os-repo ]]; then
+    cp -a /srv/parental-os-repo/. "$overlay_dir/srv/parental-os-repo/"
+  fi
 
   # Merge staged airootfs overlay if present
   if [[ -d "$staged_dir/airootfs" ]]; then
@@ -330,64 +339,192 @@ run_official_build() {
     cp -a "$staged_dir/airootfs/." "$overlay_dir/"
   fi
 
-  # Enable parental services via symlinks in systemd multi-user target
+  # Clean up any account database and policy files from overlay to keep live installer uninhibited
+  rm -f "$overlay_dir/etc/group" "$overlay_dir/etc/passwd" "$overlay_dir/etc/shadow" "$overlay_dir/etc/gshadow" 2>/dev/null || true
+  rm -f "$overlay_dir/etc/sudoers.d/parental-os" 2>/dev/null || true
+  rm -f "$overlay_dir/etc/polkit-1/rules.d/50-parental-os.rules" 2>/dev/null || true
+
+  # Ensure runtime state directory exists
+  mkdir -p "$overlay_dir/var/lib/parental-os"
+
+  # Ensure GDM display manager is enabled for graphical live session
   local wants_dir="$overlay_dir/etc/systemd/system/multi-user.target.wants"
   local graph_wants_dir="$overlay_dir/etc/systemd/system/graphical.target.wants"
   mkdir -p "$wants_dir" "$graph_wants_dir"
   ln -sfn "/usr/lib/systemd/system/gdm.service" "$overlay_dir/etc/systemd/system/display-manager.service"
   ln -sfn "/usr/lib/systemd/system/gdm.service" "$graph_wants_dir/gdm.service"
+
+  # Inject robust target provisioner to guarantee parental-guard is installed on target system
+  mkdir -p "$overlay_dir/usr/lib/parental-os" "$overlay_dir/usr/lib/systemd/system"
+  cat > "$overlay_dir/usr/lib/parental-os/target-provisioner.sh" <<'TARGET_EOF'
+#!/bin/bash
+set -u
+
+log_msg() {
+  local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+  echo "$msg" >> /var/log/parental-target-provisioner.log 2>/dev/null || true
+  if [[ -d /target/var/log ]]; then
+    echo "$msg" >> /target/var/log/parental-provisioner.log 2>/dev/null || true
+  fi
+}
+
+find_deb() {
+  for p in /usr/share/parental-os/parental-guard.deb \
+           /srv/parental-os-repo/parental-guard_*.deb \
+           /cdrom/casper/parental-guard.deb \
+           /run/casper-cdrom/casper/parental-guard.deb; do
+    if ls $p 1>/dev/null 2>&1; then
+      ls -1 $p | head -n1
+      return 0
+    fi
+  done
+  return 1
+}
+
+provision_target_partition() {
+  local deb="$1"
+  local target_mounted_by_us=0
+
+  # Ensure /target is mounted
+  if ! mountpoint -q /target 2>/dev/null; then
+    mkdir -p /target
+    local root_dev=""
+    for dev in $(lsblk -lno PATH,FSTYPE 2>/dev/null | awk '$2=="ext4"{print $1}'); do
+      if mount "$dev" /target 2>/dev/null; then
+        if [[ -f /target/etc/os-release && -f /target/etc/passwd ]]; then
+          root_dev="$dev"
+          target_mounted_by_us=1
+          break
+        else
+          umount /target 2>/dev/null || true
+        fi
+      fi
+    done
+    if [[ -z "$root_dev" ]]; then
+      log_msg "No target installation partition found to provision"
+      return 0
+    fi
+  fi
+
+  [[ -f /target/etc/passwd && -f /target/etc/os-release ]] || return 0
+  [[ -f /target/var/lib/parental-os/.provisioned ]] && return 0
+
+  log_msg "Provisioning target filesystem with $deb..."
+
+  # 1. Extract payload to /target
+  dpkg-deb -x "$deb" /target/ 2>&1 | while read -r line; do log_msg "extract: $line"; done
+
+  # 2. Extract control files to target /var/lib/dpkg/info
+  local tmp_ctrl="/target/tmp/pg-deb-control"
+  rm -rf "$tmp_ctrl"
+  mkdir -p "$tmp_ctrl"
+  if dpkg-deb -e "$deb" "$tmp_ctrl" 2>/dev/null; then
+    mkdir -p /target/var/lib/dpkg/info
+    for f in "$tmp_ctrl"/*; do
+      [[ -f "$f" ]] || continue
+      local fname
+      fname="$(basename "$f")"
+      if [[ "$fname" != "control" ]]; then
+        cp -f "$f" "/target/var/lib/dpkg/info/parental-guard.$fname"
+      fi
+    done
+
+    # Register in dpkg status if not present
+    if [[ -f /target/var/lib/dpkg/status ]] && ! grep -q '^Package: parental-guard' /target/var/lib/dpkg/status 2>/dev/null; then
+      cat "$tmp_ctrl/control" >> /target/var/lib/dpkg/status
+      echo "Status: install ok installed" >> /target/var/lib/dpkg/status
+      echo "" >> /target/var/lib/dpkg/status
+      log_msg "Registered parental-guard in /target/var/lib/dpkg/status"
+    fi
+    rm -rf "$tmp_ctrl"
+  fi
+
+  # 3. Ensure group parental-users exists in /target/etc/group
+  if [[ -f /target/etc/group ]] && ! grep -q '^parental-users:' /target/etc/group; then
+    echo "parental-users:x:998:" >> /target/etc/group
+    log_msg "Added parental-users group to /target/etc/group"
+  fi
+
+  # 4. Ensure sudoers drop-in is mode 0440
+  if [[ -f /target/etc/sudoers.d/parental-os ]]; then
+    chmod 0440 /target/etc/sudoers.d/parental-os
+  fi
+
+  # 5. Ensure runtime state dir exists
+  mkdir -p /target/var/lib/parental-os
+
+  # 6. Enable systemd units in target
+  local tgt_wants="/target/etc/systemd/system/multi-user.target.wants"
+  mkdir -p "$tgt_wants"
   for unit in parental-guard.service parental-guard-agent.service parental-guard-enroll.service parental-guard-enroll.path; do
-    if [[ -f "$overlay_dir/usr/lib/systemd/system/$unit" || -f "$overlay_dir/lib/systemd/system/$unit" ]]; then
-      ln -sfn "/usr/lib/systemd/system/$unit" "$wants_dir/$unit"
+    if [[ -f "/target/usr/lib/systemd/system/$unit" || -f "/target/lib/systemd/system/$unit" ]]; then
+      ln -sfn "/usr/lib/systemd/system/$unit" "$tgt_wants/$unit"
+      log_msg "Linked $unit in target multi-user.target.wants"
     fi
   done
 
-  # Inject target installer watcher to guarantee parental-guard is installed on target system
-  mkdir -p "$overlay_dir/usr/lib/parental-os" "$overlay_dir/usr/lib/systemd/system" "$overlay_dir/lib/systemd/system"
-  cat > "$overlay_dir/usr/lib/parental-os/target-installer.sh" <<'TARGET_EOF'
-#!/bin/bash
-set -euo pipefail
-# Wait for target system installation by subiquity / curtin
-while true; do
-  if [[ -f /target/etc/passwd && -f /target/etc/os-release ]]; then
-    if [[ ! -f /target/var/lib/parental-os/.installed ]]; then
-      sleep 2
-      if [[ -f /cdrom/casper/parental-guard.deb ]]; then
-        cp /cdrom/casper/parental-guard.deb /target/tmp/parental-guard.deb
-        chroot /target dpkg -i /tmp/parental-guard.deb 2>/dev/null || true
-        rm -f /target/tmp/parental-guard.deb
-        mkdir -p /target/var/lib/parental-os
-        touch /target/var/lib/parental-os/.installed
-      fi
-    fi
+  # 7. Ensure merged-/usr symlinks (lib -> usr/lib) and display-manager are intact
+  if [[ -d /target/usr/lib && ! -L /target/lib ]]; then
+    cp -a /target/lib/* /target/usr/lib/ 2>/dev/null || true
+    rm -rf /target/lib 2>/dev/null || true
+    ln -sfn usr/lib /target/lib
+    log_msg "Repaired merged-/usr /target/lib symlink"
   fi
-  sleep 3
-done
-TARGET_EOF
-  chmod 755 "$overlay_dir/usr/lib/parental-os/target-installer.sh"
+  if [[ -f /target/usr/lib/systemd/system/gdm.service ]]; then
+    ln -sfn "/usr/lib/systemd/system/gdm.service" "/target/etc/systemd/system/display-manager.service"
+  fi
 
-  cat > "$overlay_dir/usr/lib/systemd/system/parental-target-installer.service" <<'UNIT_EOF'
+  # 8. Run user enrollment on target users if passwd exists
+  if [[ -x /target/usr/lib/parental-os/enroll-users.sh ]]; then
+    PARENTAL_OS_ROOT_FS=/target /target/usr/lib/parental-os/enroll-users.sh 2>&1 | while read -r line; do log_msg "enroll: $line"; done || true
+  fi
+
+  touch /target/var/lib/parental-os/.provisioned
+  sync
+  log_msg "Target system successfully provisioned!"
+
+  if [[ "$target_mounted_by_us" -eq 1 ]]; then
+    umount /target 2>/dev/null || true
+  fi
+  return 0
+}
+
+DEB_FILE="$(find_deb || true)"
+if [[ -z "$DEB_FILE" ]]; then
+  log_msg "Warning: parental-guard deb not found"
+  exit 0
+fi
+
+provision_target_partition "$DEB_FILE"
+TARGET_EOF
+  chmod 755 "$overlay_dir/usr/lib/parental-os/target-provisioner.sh"
+
+  cat > "$overlay_dir/usr/lib/systemd/system/parental-target-shutdown.service" <<'SHUTDOWN_UNIT_EOF'
 [Unit]
-Description=Parental OS Target System Provisioner
-After=multi-user.target
+Description=Parental OS Final Target Provisioner on Shutdown
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target umount.target
 
 [Service]
-Type=simple
-ExecStart=/usr/lib/parental-os/target-installer.sh
-Restart=always
-RestartSec=5
+Type=oneshot
+ExecStart=/usr/lib/parental-os/target-provisioner.sh
+TimeoutStartSec=15
 
 [Install]
-WantedBy=multi-user.target
-UNIT_EOF
-  ln -sfn "/usr/lib/systemd/system/parental-target-installer.service" "$wants_dir/parental-target-installer.service"
+WantedBy=shutdown.target reboot.target halt.target
+SHUTDOWN_UNIT_EOF
+  local shutdown_wants="$overlay_dir/etc/systemd/system/shutdown.target.wants"
+  local reboot_wants="$overlay_dir/etc/systemd/system/reboot.target.wants"
+  mkdir -p "$shutdown_wants" "$reboot_wants"
+  ln -sfn "/usr/lib/systemd/system/parental-target-shutdown.service" "$shutdown_wants/parental-target-shutdown.service"
+  ln -sfn "/usr/lib/systemd/system/parental-target-shutdown.service" "$reboot_wants/parental-target-shutdown.service"
 
   # Step 4: Compress custom overlay layer
   log "Compressing custom overlay layer to casper/minimal.standard.live.custom.squashfs..."
   local custom_squash="$iso_extracted/casper/minimal.standard.live.custom.squashfs"
   rm -f "$custom_squash"
   mksquashfs "$overlay_dir" "$custom_squash" -comp xz -noappend -b 1048576 2>&1 | tee -a "$staged_dir/out/squashfs.log" || true
-  
+
   local custom_size
   custom_size="$(du -sx --block-size=1 "$overlay_dir" 2>/dev/null | cut -f1)"
   printf '%s\n' "$custom_size" > "$iso_extracted/casper/minimal.standard.live.custom.size"
@@ -403,11 +540,15 @@ UNIT_EOF
 menuentry "Boot from Hard Disk" --id "harddisk" {
     insmod part_gpt
     insmod part_msdos
-    insmod chain
     insmod ext2
     insmod fat
-    set root=(hd0)
-    chainloader +1 || exit 1
+    search --no-floppy --file --set=root /boot/grub/grub.cfg
+    if [ -f ($root)/boot/grub/grub.cfg ]; then
+        configfile ($root)/boot/grub/grub.cfg
+    else
+        set root=(hd0)
+        chainloader +1 || exit 1
+    fi
 }
 GRUB_HD_EOF
     fi

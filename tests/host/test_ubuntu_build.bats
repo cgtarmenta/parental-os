@@ -962,3 +962,12 @@ EOF
   run ubuntu_validate_artifact_set desktop "$out"
   [ "$status" -eq 0 ]
 }
+
+@test "Ubuntu build-edition.sh builds custom live layer and wires target provisioner" {
+  f="$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+  [ -f "$f" ]
+  grep -Eq 'minimal\.standard\.live\.custom\.squashfs' "$f"
+  grep -Eq 'layerfs-path=minimal\.standard\.live\.custom\.squashfs' "$f"
+  grep -Eq 'target-provisioner\.sh' "$f"
+}
+

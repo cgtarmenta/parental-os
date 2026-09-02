@@ -18,12 +18,30 @@ Cmnd_Alias PARENTAL_GUARDED = \
   /usr/bin/passwd, \
   /usr/bin/timedatectl, \
   /usr/bin/date, \
-  /usr/bin/systemctl stop parental-guard*, \
-  /usr/bin/systemctl disable parental-guard*, \
-  /usr/bin/systemctl mask parental-guard*, \
-  /usr/bin/systemctl stop timekpr*, \
-  /usr/bin/systemctl disable timekpr*, \
-  /usr/bin/systemctl mask timekpr*, \
+  /usr/bin/systemctl stop parental-guard, \
+  /usr/bin/systemctl stop parental-guard.service, \
+  /usr/bin/systemctl stop parental-guard-agent, \
+  /usr/bin/systemctl stop parental-guard-agent.service, \
+  /usr/bin/systemctl stop parental-guard-enroll, \
+  /usr/bin/systemctl stop parental-guard-enroll.service, \
+  /usr/bin/systemctl disable parental-guard, \
+  /usr/bin/systemctl disable parental-guard.service, \
+  /usr/bin/systemctl disable parental-guard-agent, \
+  /usr/bin/systemctl disable parental-guard-agent.service, \
+  /usr/bin/systemctl disable parental-guard-enroll, \
+  /usr/bin/systemctl disable parental-guard-enroll.service, \
+  /usr/bin/systemctl mask parental-guard, \
+  /usr/bin/systemctl mask parental-guard.service, \
+  /usr/bin/systemctl mask parental-guard-agent, \
+  /usr/bin/systemctl mask parental-guard-agent.service, \
+  /usr/bin/systemctl mask parental-guard-enroll, \
+  /usr/bin/systemctl mask parental-guard-enroll.service, \
+  /usr/bin/systemctl stop timekpr, \
+  /usr/bin/systemctl stop timekpr-admin, \
+  /usr/bin/systemctl disable timekpr, \
+  /usr/bin/systemctl disable timekpr-admin, \
+  /usr/bin/systemctl mask timekpr, \
+  /usr/bin/systemctl mask timekpr-admin, \
   /usr/bin/apt remove parental-guard, \
   /usr/bin/apt purge parental-guard, \
   /usr/bin/apt-get remove parental-guard, \
