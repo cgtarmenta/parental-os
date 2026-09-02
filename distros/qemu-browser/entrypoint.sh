@@ -61,6 +61,7 @@ QEMU_ARGS=(
   -display none
   -vnc 127.0.0.1:0
   -serial mon:stdio
+  -monitor "unix:$STATE_DIR/monitor.sock,server,nowait"
 )
 
 if [[ -f "$PARENTAL_OS_ISO" && "$PARENTAL_OS_ISO" != "/dev/null" && "${PARENTAL_OS_BOOT_FROM:-}" != "disk" ]]; then

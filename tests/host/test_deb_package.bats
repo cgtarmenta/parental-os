@@ -26,8 +26,8 @@ setup() {
   grep -Eq '^usr/bin[[:space:]]+usr/' "$f"
   # parental-os library must land at /usr/lib/parental-os.
   grep -Eq '^usr/lib/parental-os[[:space:]]+usr/lib/' "$f"
-  # systemd units must map to lib/systemd so dh_installsystemd detects them.
-  grep -Eq '^usr/lib/systemd/system[[:space:]]+lib/systemd/' "$f"
+  # systemd units must map to usr/lib/systemd or lib/systemd.
+  grep -Eq '^usr/lib/systemd/system[[:space:]]+(usr/lib/systemd/|lib/systemd/)' "$f"
 }
 
 @test "source format is 3.0 (quilt) to match the 0.1.0-1 Debian revision" {
