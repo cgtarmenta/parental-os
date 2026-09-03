@@ -1,0 +1,21 @@
+[package]
+name = "parental-guard-agent"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+name = "parental_guard_agent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "parental-guard-agent"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2.5"
+tower = { version = "0.4", features = ["util"] }
