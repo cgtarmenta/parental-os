@@ -262,9 +262,29 @@ stage_official_tree() {
   mkdir -p "$staged_dir/archiso/airootfs/usr/share/calamares"
   cp -a "$calamares_dir/src" "$staged_dir/archiso/airootfs/usr/share/calamares/src"
 
-  # Stage Calamares guardian module into live ISO
+  # Compile and stage C++/Qt6 Calamares guardian view module
+  local viewmodule_src="$REPO_DIR/distros/cachyos/calamares/viewmodule"
   local guardian_src="$REPO_DIR/distros/cachyos/calamares/modules"
-  if [[ -d "$guardian_src" ]]; then
+  if [[ -d "$viewmodule_src" ]]; then
+    local build_tmp
+    build_tmp="$(mktemp -d)"
+    log "stage_official_tree: compiling C++/Qt6 Calamares guardian view module"
+    cmake -S "$viewmodule_src" -B "$build_tmp" -DCMAKE_BUILD_TYPE=Release >/dev/null
+    cmake --build "$build_tmp" -j"$(nproc)" >/dev/null
+
+    mkdir -p "$staged_dir/archiso/airootfs/usr/lib/calamares/modules/guardian"
+    cp "$build_tmp/libcalamares_viewmodule_guardian.so" "$staged_dir/archiso/airootfs/usr/lib/calamares/modules/guardian/"
+    cp "$viewmodule_src/module.desc" "$staged_dir/archiso/airootfs/usr/lib/calamares/modules/guardian/"
+    cp "$viewmodule_src/guardian.conf" "$staged_dir/archiso/airootfs/usr/lib/calamares/modules/guardian/"
+
+    # Also stash in srv/parental-os-repo so post-pacstrap can restore it
+    mkdir -p "$staged_dir/archiso/airootfs/srv/parental-os-repo/modules/guardian"
+    cp "$build_tmp/libcalamares_viewmodule_guardian.so" "$staged_dir/archiso/airootfs/srv/parental-os-repo/modules/guardian/"
+    cp "$viewmodule_src/module.desc" "$staged_dir/archiso/airootfs/srv/parental-os-repo/modules/guardian/"
+    cp "$viewmodule_src/guardian.conf" "$staged_dir/archiso/airootfs/srv/parental-os-repo/modules/guardian/"
+    rm -rf "$build_tmp"
+    log "stage_official_tree: compiled and staged C++/Qt6 Calamares guardian view module"
+  elif [[ -d "$guardian_src" ]]; then
     mkdir -p "$staged_dir/archiso/airootfs/usr/lib/calamares/modules/guardian"
     cp -a "$guardian_src/." "$staged_dir/archiso/airootfs/usr/lib/calamares/modules/guardian/"
     mkdir -p "$staged_dir/archiso/airootfs/srv/parental-os-repo/modules/guardian"

@@ -29,6 +29,11 @@ RUN pacman -Syu --noconfirm --needed \
       libisoburn \
       cargo \
       rust \
+      cmake \
+      extra-cmake-modules \
+      qt6-base \
+      qt6-tools \
+      kcoreaddons \
       archlinux-keyring \
     && rm -rf /var/cache/pacman/pkg/*
 
@@ -47,6 +52,10 @@ RUN pacman-key --init \
     && pacman-key --populate archlinux \
     && pacman-key --populate cachyos \
     || true
+
+# Install Calamares development headers & libraries for building C++/Qt6 view module
+RUN pacman -Sy --noconfirm --needed cachyos-calamares-next \
+    && rm -rf /var/cache/pacman/pkg/*
 
 # Create a non-root builder user with narrowly scoped sudo access.
 # The upstream CachyOS buildiso.sh uses sudo for mkarchiso and for patching

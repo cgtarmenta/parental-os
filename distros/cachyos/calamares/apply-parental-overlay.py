@@ -345,8 +345,11 @@ def install_live_calamares_files(calamares_src_dir: Path, live_airootfs_dir: Pat
 
     guardian_src = calamares_src_dir / "src/modules/guardian"
     if not guardian_src.is_dir():
+        sibling_viewmodule = Path(__file__).resolve().parent / "viewmodule"
         sibling_modules = Path(__file__).resolve().parent / "modules"
-        if sibling_modules.is_dir():
+        if sibling_viewmodule.is_dir():
+            guardian_src = sibling_viewmodule
+        elif sibling_modules.is_dir():
             guardian_src = sibling_modules
 
     if guardian_src.is_dir():
@@ -372,7 +375,9 @@ def install_live_calamares_files(calamares_src_dir: Path, live_airootfs_dir: Pat
 
 def stage_guardian_module(calamares_src_dir: Path) -> None:
     """Stage guardian Calamares module files into Calamares source tree."""
-    modules_src = Path(__file__).resolve().parent / "modules"
+    modules_src = Path(__file__).resolve().parent / "viewmodule"
+    if not modules_src.is_dir():
+        modules_src = Path(__file__).resolve().parent / "modules"
     if not modules_src.is_dir():
         return
     dest_dir = calamares_src_dir / "src/modules/guardian"
@@ -385,12 +390,29 @@ def stage_guardian_module(calamares_src_dir: Path) -> None:
 
 
 def wire_guardian_to_settings(conf_path: Path) -> None:
-    """Wire guardian module into Calamares settings exec sequence."""
+    """Wire guardian module into Calamares settings show and/or exec sequence."""
     content = load_yaml(conf_path)
     if "- guardian" in content:
         return
 
-    # Look for exec sequence insertion points
+    # 1. Prefer inserting into 'show:' sequence after 'users'
+    show_idx = content.find("- show:")
+    if show_idx != -1:
+        exec_idx = content.find("- exec:", show_idx)
+        end_of_show = exec_idx if exec_idx != -1 else len(content)
+        show_block = content[show_idx:end_of_show]
+        users_match = re.search(r"(\n\s*-\s*users\b)", show_block)
+        if users_match:
+            insert_pos = show_idx + users_match.end()
+            indent_m = re.search(r"\n(\s*)-\s*users", show_block)
+            indent = indent_m.group(1) if indent_m else "  "
+            insertion = f"\n{indent}- guardian"
+            new_content = content[:insert_pos] + insertion + content[insert_pos:]
+            conf_path.write_text(new_content, encoding="utf-8")
+            print(f"apply-parental-overlay: wired guardian into show sequence in {conf_path}")
+            return
+
+    # 2. Fallback: look for exec sequence insertion points
     for marker in ("- services-systemd", "- users"):
         pattern = rf"(\n\s*{re.escape(marker)}\b)"
         match = re.search(pattern, content)

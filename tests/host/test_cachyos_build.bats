@@ -1439,3 +1439,33 @@ skip_if_no_docker() {
   [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/GuardianViewStep.h" ]
   [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/GuardianViewStep.cpp" ]
 }
+
+@test "apply-parental-overlay wires guardian into show sequence after users" {
+  calamares="$TEST_TMP/calamares"
+  live="$TEST_TMP/live"
+  _copy_calamares_fixture "$calamares"
+  mkdir -p "$live/usr/local/bin"
+  cat >"$live/usr/local/bin/calamares-online.sh" <<'EOF'
+#!/usr/bin/env bash
+sudo pacman -Sy --noconfirm cachyos-calamares-next
+exec pkexec-wrapper calamares
+EOF
+  cat >"$calamares/settings.conf" <<'EOF'
+sequence:
+- show:
+  - welcome
+  - users
+  - summary
+- exec:
+  - partition
+EOF
+
+  _run_transformer_source "$calamares" "$live" cachyos-calamares-next
+  [ "$status" -eq 0 ]
+  run grep -A 2 'users' "$calamares/settings.conf"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ guardian ]]
+}
+
+
+
