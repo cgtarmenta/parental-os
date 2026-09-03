@@ -603,6 +603,38 @@ SHUTDOWN_UNIT_EOF
   ln -sfn "/usr/lib/systemd/system/parental-target-shutdown.service" "$shutdown_wants/parental-target-shutdown.service"
   ln -sfn "/usr/lib/systemd/system/parental-target-shutdown.service" "$reboot_wants/parental-target-shutdown.service"
 
+  # Also install live target installer watcher daemon to provision target during installation
+  cat > "$overlay_dir/usr/lib/parental-os/target-watcher.sh" <<'WATCHER_EOF'
+#!/bin/bash
+set -u
+while true; do
+  if [[ -f /target/etc/passwd && -f /target/etc/os-release && ! -f /target/var/lib/parental-os/.provisioned ]]; then
+    sleep 3
+    /usr/lib/parental-os/target-provisioner.sh || true
+  fi
+  sleep 3
+done
+WATCHER_EOF
+  chmod 755 "$overlay_dir/usr/lib/parental-os/target-watcher.sh"
+
+  cat > "$overlay_dir/usr/lib/systemd/system/parental-target-watcher.service" <<'WATCHER_UNIT_EOF'
+[Unit]
+Description=Parental OS Target System Provisioner Watcher
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/parental-os/target-watcher.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+WATCHER_UNIT_EOF
+  local live_wants="$overlay_dir/etc/systemd/system/multi-user.target.wants"
+  mkdir -p "$live_wants"
+  ln -sfn "/usr/lib/systemd/system/parental-target-watcher.service" "$live_wants/parental-target-watcher.service"
+
   # Step 4: Compress custom overlay layer
   log "Compressing custom overlay layer to casper/minimal.standard.live.custom.squashfs..."
   local custom_squash="$iso_extracted/casper/minimal.standard.live.custom.squashfs"

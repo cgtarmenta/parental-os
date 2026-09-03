@@ -982,6 +982,7 @@ EOF
   grep -Eq 'minimal\.standard\.live\.custom\.squashfs' "$f"
   grep -Eq 'layerfs-path=minimal\.standard\.live\.custom\.squashfs' "$f"
   grep -Eq 'target-provisioner\.sh' "$f"
+  grep -Eq 'target-watcher\.sh' "$f"
 }
 
 # ---------------------------------------------------------------------------

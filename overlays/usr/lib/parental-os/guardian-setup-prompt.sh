@@ -95,8 +95,24 @@ write_hash_file() {
   fi
 }
 
+find_display() {
+  if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+    if [[ -e /tmp/.X11-unix/X0 ]]; then
+      export DISPLAY=":0"
+    fi
+    for sock in /run/user/*/wayland-*; do
+      if [[ -S "$sock" ]]; then
+        export WAYLAND_DISPLAY="$(basename "$sock")"
+        export XDG_RUNTIME_DIR="$(dirname "$sock")"
+        break
+      fi
+    done
+  fi
+}
+
 prompt_zenity() {
   command -v zenity >/dev/null 2>&1 || return 1
+  find_display
   [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]] || return 1
 
   while true; do
@@ -157,13 +173,24 @@ if [[ -z "$PASSWORD" ]]; then
     # In headless mode without explicit password, generate secure random secret
     echo "guardian-setup-prompt: headless mode with no password set; generating random secret" >&2
     PASSWORD="$(od -vN 24 -An -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || date +%s%N)"
-  elif prompt_zenity; then
-    :
-  elif prompt_terminal; then
-    :
   else
-    echo "guardian-setup-prompt: no interactive display or terminal available; generating random fallback secret" >&2
-    PASSWORD="$(od -vN 24 -An -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || date +%s%N)"
+    # In interactive graphical environment, wait up to 30s for display to be ready
+    for _ in $(seq 1 30); do
+      find_display
+      if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+        break
+      fi
+      sleep 1
+    done
+
+    if prompt_zenity; then
+      :
+    elif prompt_terminal; then
+      :
+    else
+      echo "guardian-setup-prompt: no interactive display or terminal available; generating random fallback secret" >&2
+      PASSWORD="$(od -vN 24 -An -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || date +%s%N)"
+    fi
   fi
 fi
 
