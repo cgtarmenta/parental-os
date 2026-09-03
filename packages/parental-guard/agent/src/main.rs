@@ -8,6 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let expected_hash = fs::read_to_string(&hash_path)
         .ok()
         .map(|s| s.trim().to_string())
+        .or_else(|| fs::read_to_string("/run/parental-os/guardian.hash").ok().map(|s| s.trim().to_string()))
         .or_else(|| std::env::var("PARENTAL_OS_GUARDIAN_HASH").ok());
 
     let port: u16 = std::env::var("PARENTAL_OS_AGENT_PORT")
