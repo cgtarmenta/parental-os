@@ -366,7 +366,12 @@ def install_live_calamares_files(calamares_src_dir: Path, live_airootfs_dir: Pat
                 guardian_conf_src.read_text(encoding="utf-8"), encoding="utf-8"
             )
 
-        for live_conf in (live_etc / "settings.conf", live_etc / "settings_online.conf"):
+        for live_conf in (
+            live_etc / "settings.conf",
+            live_etc / "settings_online.conf",
+            live_airootfs_dir / "usr/share/calamares/settings.conf",
+            live_airootfs_dir / "usr/share/calamares/settings_online.conf",
+        ):
             if live_conf.is_file():
                 wire_guardian_to_settings(live_conf)
 
