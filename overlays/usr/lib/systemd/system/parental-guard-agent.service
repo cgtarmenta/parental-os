@@ -6,6 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/parental-os/config.env
+ExecStartPre=-/usr/bin/iptables -I INPUT -p tcp --dport 7420 -j ACCEPT
+ExecStartPre=-/usr/bin/nft add rule inet filter input tcp dport 7420 accept
 ExecStart=/usr/lib/parental-os/parental-guard-agent
 Restart=on-failure
 RestartSec=2

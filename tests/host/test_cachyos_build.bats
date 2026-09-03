@@ -1458,13 +1458,15 @@ sequence:
   - summary
 - exec:
   - partition
+  - users
+  - umount
 EOF
 
   _run_transformer_source "$calamares" "$live" cachyos-calamares-next
   [ "$status" -eq 0 ]
-  run grep -A 2 'users' "$calamares/settings.conf"
-  [ "$status" -eq 0 ]
-  [[ "$output" =~ guardian ]]
+  # Both show and exec sequences must have guardian after users
+  guardian_count=$(grep -c -- '- guardian' "$calamares/settings.conf")
+  [ "$guardian_count" -eq 2 ]
 }
 
 

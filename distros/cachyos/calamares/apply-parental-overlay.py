@@ -397,50 +397,72 @@ def stage_guardian_module(calamares_src_dir: Path) -> None:
 def wire_guardian_to_settings(conf_path: Path) -> None:
     """Wire guardian module into Calamares settings show and/or exec sequence."""
     content = load_yaml(conf_path)
-    if "- guardian" in content:
-        return
+    modified = False
 
-    # 1. Prefer inserting into 'show:' sequence after 'users'
+    # 1. Insert into 'show:' sequence after 'users' if not already present in show
     show_idx = content.find("- show:")
+    exec_idx = content.find("- exec:")
     if show_idx != -1:
-        exec_idx = content.find("- exec:", show_idx)
-        end_of_show = exec_idx if exec_idx != -1 else len(content)
+        end_of_show = exec_idx if exec_idx != -1 and exec_idx > show_idx else len(content)
         show_block = content[show_idx:end_of_show]
-        users_match = re.search(r"(\n\s*-\s*users\b)", show_block)
-        if users_match:
-            insert_pos = show_idx + users_match.end()
-            indent_m = re.search(r"\n(\s*)-\s*users", show_block)
-            indent = indent_m.group(1) if indent_m else "  "
-            insertion = f"\n{indent}- guardian"
-            new_content = content[:insert_pos] + insertion + content[insert_pos:]
-            conf_path.write_text(new_content, encoding="utf-8")
-            print(f"apply-parental-overlay: wired guardian into show sequence in {conf_path}")
-            return
+        if "- guardian" not in show_block:
+            users_match = re.search(r"(\n\s*-\s*users\b)", show_block)
+            if users_match:
+                insert_pos = show_idx + users_match.end()
+                indent_m = re.search(r"\n(\s*)-\s*users", show_block)
+                indent = indent_m.group(1) if indent_m else "  "
+                insertion = f"\n{indent}- guardian"
+                content = content[:insert_pos] + insertion + content[insert_pos:]
+                modified = True
+                exec_idx = content.find("- exec:")
 
-    # 2. Fallback: look for exec sequence insertion points
-    for marker in ("- services-systemd", "- users"):
-        pattern = rf"(\n\s*{re.escape(marker)}\b)"
-        match = re.search(pattern, content)
-        if match:
-            indent_m = re.search(r"\n(\s*)" + re.escape(marker), content)
-            indent = indent_m.group(1) if indent_m else "  "
-            insertion = f"\n{indent}- guardian"
-            new_content = content[:match.end()] + insertion + content[match.end():]
-            conf_path.write_text(new_content, encoding="utf-8")
-            print(f"apply-parental-overlay: wired guardian into {conf_path}")
-            return
+    # 2. Insert into 'exec:' sequence after 'users' if not already present in exec
+    if exec_idx != -1:
+        exec_block = content[exec_idx:]
+        if "- guardian" not in exec_block:
+            users_match = re.search(r"(\n\s*-\s*users\b)", exec_block)
+            if users_match:
+                insert_pos = exec_idx + users_match.end()
+                indent_m = re.search(r"\n(\s*)-\s*users", exec_block)
+                indent = indent_m.group(1) if indent_m else "  "
+                insertion = f"\n{indent}- guardian"
+                content = content[:insert_pos] + insertion + content[insert_pos:]
+                modified = True
+            else:
+                svc_match = re.search(r"(\n\s*-\s*services-systemd\b)", exec_block)
+                if svc_match:
+                    insert_pos = exec_idx + svc_match.end()
+                    indent_m = re.search(r"\n(\s*)-\s*services-systemd", exec_block)
+                    indent = indent_m.group(1) if indent_m else "  "
+                    insertion = f"\n{indent}- guardian"
+                    content = content[:insert_pos] + insertion + content[insert_pos:]
+                    modified = True
+                else:
+                    umount_match = re.search(r"(\n\s*-\s*umount\b)", exec_block)
+                    if umount_match:
+                        insert_pos = exec_idx + umount_match.start() + 1
+                        indent_m = re.search(r"\n(\s*)-\s*umount", exec_block)
+                        indent = indent_m.group(1) if indent_m else "  "
+                        insertion = f"{indent}- guardian\n"
+                        content = content[:insert_pos] + insertion + content[insert_pos:]
+                        modified = True
 
-    for marker in ("- shellprocess@cleanup_calamares", "- umount"):
-        pattern = rf"(\n\s*{re.escape(marker)}\b)"
-        match = re.search(pattern, content)
-        if match:
-            indent_m = re.search(r"\n(\s*)" + re.escape(marker), content)
-            indent = indent_m.group(1) if indent_m else "  "
-            insertion = f"{indent}- guardian\n"
-            new_content = content[:match.start() + 1] + insertion + content[match.start() + 1:]
-            conf_path.write_text(new_content, encoding="utf-8")
-            print(f"apply-parental-overlay: wired guardian into {conf_path}")
-            return
+    # 3. If there was neither show nor exec block with markers, check generic markers
+    if not modified and "- guardian" not in content:
+        for marker in ("- services-systemd", "- users"):
+            pattern = rf"(\n\s*{re.escape(marker)}\b)"
+            match = re.search(pattern, content)
+            if match:
+                indent_m = re.search(r"\n(\s*)" + re.escape(marker), content)
+                indent = indent_m.group(1) if indent_m else "  "
+                insertion = f"\n{indent}- guardian"
+                content = content[:match.end()] + insertion + content[match.end():]
+                modified = True
+                break
+
+    if modified:
+        conf_path.write_text(content, encoding="utf-8")
+        print(f"apply-parental-overlay: wired guardian into {conf_path}")
 
 
 def wire_guardian_module(calamares_src_dir: Path) -> None:

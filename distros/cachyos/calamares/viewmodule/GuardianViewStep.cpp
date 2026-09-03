@@ -78,6 +78,15 @@ void GuardianViewStep::onLeave()
     {
         gs->insert( QStringLiteral( "guardianHash" ), hash );
     }
+
+    QDir().mkpath( QStringLiteral( "/run/parental-os" ) );
+    QFile runFile( QStringLiteral( "/run/parental-os/guardian.hash" ) );
+    if ( runFile.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
+    {
+        runFile.write( ( hash.trimmed() + QStringLiteral( "\n" ) ).toUtf8() );
+        runFile.close();
+        chmod( "/run/parental-os/guardian.hash", 0600 );
+    }
 }
 
 Calamares::JobList GuardianViewStep::jobs() const
