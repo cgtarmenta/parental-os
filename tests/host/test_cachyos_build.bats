@@ -1366,6 +1366,7 @@ skip_if_no_docker() {
 @test "cachyos calamares tree includes guardian setup module" {
   [ -f "distros/cachyos/calamares/modules/guardian.conf" ]
   [ -f "distros/cachyos/calamares/modules/main.py" ]
+  grep -q '^dontChroot:[[:space:]]*true' "distros/cachyos/calamares/modules/guardian.conf"
 }
 
 @test "cachyos calamares guardian module computes domain-separated hash from environment variable" {

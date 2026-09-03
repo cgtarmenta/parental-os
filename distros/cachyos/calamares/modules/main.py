@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import subprocess
 import sys
 
 DOMAIN_PREFIX = "parental-guard:lan-v1:"
@@ -129,6 +130,17 @@ def run():
         target_file = root_mount_point / TARGET_REL_PATH
 
     write_hash_file(target_file, hash_val)
+
+    # Restart agent service if running to pick up the new secret
+    try:
+        subprocess.run(
+            ["systemctl", "try-restart", "parental-guard-agent.service"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
 
     # Return None on success per Calamares Python job module protocol
     return None

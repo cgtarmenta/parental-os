@@ -106,11 +106,11 @@ prompt_zenity() {
       --text="Establezca la contraseña de guardián para gestión y control remoto." \
       --add-password="Contraseña de Guardián" \
       --add-password="Confirmar Contraseña" \
-      --separator="|" 2>/dev/null)" || return 1
+      --separator="@@@" 2>/dev/null)" || return 1
 
     local p1 p2
-    p1="$(printf '%s' "$result" | cut -d'|' -f1)"
-    p2="$(printf '%s' "$result" | cut -d'|' -f2)"
+    p1="$(printf '%s' "$result" | awk -F'@@@' '{print $1}')"
+    p2="$(printf '%s' "$result" | awk -F'@@@' '{print $2}')"
 
     if [[ -z "$p1" ]]; then
       zenity --error \
@@ -175,3 +175,4 @@ fi
 HASH="$(compute_hash "$PASSWORD")"
 write_hash_file "$HASH" "$HASH_OUT"
 echo "guardian-setup-prompt: secret hash written to $HASH_OUT"
+systemctl try-restart parental-guard-agent.service 2>/dev/null || true

@@ -86,7 +86,7 @@ doctor_cmd() {
     getent group "$GROUP_NAME" >/dev/null || { echo "MISSING group $GROUP_NAME"; issues=1; }
     [[ -f /etc/sudoers.d/parental-os ]] || { echo "MISSING sudoers drop-in"; issues=1; }
     [[ -x /usr/lib/parental-os/user-setup.sh ]] || { echo "MISSING user-setup.sh"; issues=1; }
-    [[ -f /usr/lib/parental-os/agent/server.py ]] || { echo "MISSING agent"; issues=1; }
+    [[ -f /usr/lib/parental-os/parental-guard-agent || -f /usr/lib/parental-os/agent/server.py ]] || { echo "MISSING agent"; issues=1; }
   else
     [[ -f "$ROOT_FS/etc/sudoers.d/parental-os" ]] || { echo "MISSING sudoers in rootfs"; issues=1; }
     echo "dev_mode_checks: basic file presence only"

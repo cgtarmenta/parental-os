@@ -36,5 +36,8 @@ package() {
     install -Dm755 "$src/agent/target/release/parental-guard-agent" "$pkgdir/usr/lib/parental-os/parental-guard-agent"
   elif [[ -n "${PARENTAL_OS_ROOT:-}" && -f "$PARENTAL_OS_ROOT/packages/parental-guard/agent/target/release/parental-guard-agent" ]]; then
     install -Dm755 "$PARENTAL_OS_ROOT/packages/parental-guard/agent/target/release/parental-guard-agent" "$pkgdir/usr/lib/parental-os/parental-guard-agent"
+  else
+    error "parental-guard-agent binary not found"
+    return 1
   fi
 }
