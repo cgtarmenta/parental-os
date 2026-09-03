@@ -1427,3 +1427,15 @@ skip_if_no_docker() {
   actual="$(cat "$target_root/etc/parental-os/guardian.hash")"
   [ "$actual" = "$precomputed" ]
 }
+
+@test "cachyos calamares viewmodule source files exist" {
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/CMakeLists.txt" ]
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/module.desc" ]
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/guardian.conf" ]
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/GuardianPage.h" ]
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/GuardianPage.cpp" ]
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/GuardianJob.h" ]
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/GuardianJob.cpp" ]
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/GuardianViewStep.h" ]
+  [ -f "$TEST_ROOT/distros/cachyos/calamares/viewmodule/GuardianViewStep.cpp" ]
+}

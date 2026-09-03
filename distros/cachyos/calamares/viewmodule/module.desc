@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Parental-OS
+# SPDX-License-Identifier: GPL-3.0-or-later
+---
+type: "viewmodule"
+name: "guardian"
+interface: "qtplugin"
+load: "libcalamares_viewmodule_guardian.so"
