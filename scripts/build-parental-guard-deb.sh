@@ -4,7 +4,7 @@
 # The committed packages/parental-guard/debian/ tree is the canonical build
 # input: it is copied into the stage unchanged and an equality assertion guards
 # against silent divergence. The build produces both a 3.0 (quilt) source
-# package and the binary parental-guard_0.1.0-1_all.deb under out/packages/.
+# package and the binary parental-guard_0.1.0-1_<arch>.deb under out/packages/.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=/dev/null
@@ -42,6 +42,9 @@ mkdir -p "$STAGE" "$DEB_OUT"
 
 # Upstream filesystem payload at package root for dh_install/.install mapping.
 rsync -a "$OUT/cachyos/staging/parental-guard/src/" "$STAGE/"
+# Stage the Rust agent crate for compilation during dh_auto_build.
+mkdir -p "$STAGE/agent"
+rsync -a --exclude=target "$ROOT/packages/parental-guard/agent/" "$STAGE/agent/"
 # Canonical debian/ metadata copied unchanged (Finding 3: no rewrites).
 rsync -a "$ROOT/packages/parental-guard/debian/" "$STAGE/debian/"
 
@@ -64,22 +67,29 @@ if command -v dpkg-buildpackage >/dev/null 2>&1 && [[ "${FORCE_DOCKER:-0}" != "1
   (
     cd "$STAGE"
     dpkg-source -b .
-    dpkg-buildpackage -us -uc -b
+    dpkg-buildpackage -us -uc -b -d
   ) 2>&1 | tee "$OUT/logs/parental-guard-deb-build.log"
 else
   log "building deb in docker (debian:bookworm) from $STAGE"
+  mkdir -p "$OUT/.cargo-cache" "$OUT/.rustup-cache"
   docker_cli run --rm \
     -v "$STAGE_PARENT:/build" \
+    -v "$OUT/.cargo-cache:/root/.cargo" \
+    -v "$OUT/.rustup-cache:/root/.rustup" \
     -w "/build/${SRCNAME}-${PKGVER}" \
     debian:bookworm \
     bash -lc '
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq
-      apt-get install -y --no-install-recommends build-essential debhelper dpkg-dev fakeroot
+      apt-get install -y --no-install-recommends build-essential debhelper dpkg-dev fakeroot curl ca-certificates pkg-config
+      export PATH="/root/.cargo/bin:$PATH"
+      if ! command -v cargo >/dev/null 2>&1; then
+        curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+      fi
       # Build the 3.0 (quilt) source package, then the binary package.
       dpkg-source -b .
-      dpkg-buildpackage -us -uc -b
+      dpkg-buildpackage -us -uc -b -d
       ls -la /build
     ' 2>&1 | tee "$OUT/logs/parental-guard-deb-build.log"
 fi
@@ -88,8 +98,8 @@ fi
 shopt -s nullglob
 copied=0
 mkdir -p "$DEB_OUT"
+rm -f "$DEB_OUT"/parental-guard_*.deb
 for f in "$STAGE_PARENT"/parental-guard_*.deb; do
-  rm -f "$DEB_OUT/$(basename "$f")"
   cp -f "$f" "$DEB_OUT/"
   copied=1
 done

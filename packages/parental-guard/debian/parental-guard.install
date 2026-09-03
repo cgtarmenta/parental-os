@@ -6,4 +6,5 @@ usr/lib/parental-os usr/lib/
 # lib/systemd/system, not usr/lib/systemd/system). On merged-/usr the
 # installed path resolves to /usr/lib/systemd/system via the /lib symlink.
 usr/lib/systemd/system lib/systemd/
+agent/target/release/parental-guard-agent usr/lib/parental-os/
 

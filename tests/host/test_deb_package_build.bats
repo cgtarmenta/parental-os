@@ -15,7 +15,9 @@ setup_file() {
   TEST_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   export PARENTAL_OS_ROOT="$TEST_ROOT"
   export DOCKER_CONTEXT="${DOCKER_CONTEXT:-default}"
-  export DEB="$TEST_ROOT/out/packages/parental-guard_0.1.0-1_all.deb"
+  ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
+  export DEB_ARCH="$ARCH"
+  export DEB="$TEST_ROOT/out/packages/parental-guard_0.1.0-1_${ARCH}.deb"
   export STAGE_PARENT="$TEST_ROOT/out/deb-src"
   # Build once for the whole file; the build script cleans and re-stages.
   mkdir -p "$TEST_ROOT/out"
@@ -38,7 +40,8 @@ skip_if_no_docker() {
     || skip "docker context $DOCKER_CONTEXT is unavailable"
 }
 
-bats_test_function --description "docker build produces exact artifact parental-guard_0.1.0-1_all.deb" -- deb_build_produces_exact_artifact
+ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
+bats_test_function --description "docker build produces exact artifact parental-guard_0.1.0-1_${ARCH}.deb" -- deb_build_produces_exact_artifact
 deb_build_produces_exact_artifact() {
   skip_if_no_docker
   [ -f "$PARENTAL_OS_ROOT/out/deb-build-status.txt" ]
@@ -61,6 +64,7 @@ deb_contains_expected_payload() {
   [[ "$output" == *"/etc/profile.d/parental-os-first-login.sh"* ]]
   [[ "$output" == *"/usr/bin/parental-guard"* ]]
   [[ "$output" == *"/usr/lib/parental-os/agent/server.py"* ]]
+  [[ "$output" == *"/usr/lib/parental-os/parental-guard-agent"* ]]
   [[ "$output" == *"/usr/lib/parental-os/first-login.sh"* ]]
   [[ "$output" == *"/usr/lib/parental-os/user-setup.sh"* ]]
   # Systemd units ship under /usr/lib/systemd/system or /lib/systemd/system

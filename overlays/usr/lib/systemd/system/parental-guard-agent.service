@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/parental-os/config.env
-ExecStart=/usr/bin/python3 /usr/lib/parental-os/agent/server.py
+ExecStart=/usr/lib/parental-os/parental-guard-agent
 Restart=on-failure
 RestartSec=2
 

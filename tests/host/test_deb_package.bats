@@ -14,6 +14,35 @@
 setup() {
   export PARENTAL_OS_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   DEB_DIR="$PARENTAL_OS_ROOT/packages/parental-guard/debian"
+  # shellcheck source=/dev/null
+  source "$PARENTAL_OS_ROOT/scripts/lib/common.sh"
+  export DOCKER_CONTEXT="${DOCKER_CONTEXT:-default}"
+  shopt -s nullglob
+  local debs=("$PARENTAL_OS_ROOT"/out/packages/parental-guard_0.1.0-1_*.deb)
+  shopt -u nullglob
+  if [[ ${#debs[@]} -gt 0 ]]; then
+    export DEB="${debs[0]}"
+  else
+    export DEB="$PARENTAL_OS_ROOT/out/packages/parental-guard_0.1.0-1_all.deb"
+  fi
+}
+
+skip_if_no_docker() {
+  command -v docker >/dev/null 2>&1 || skip "docker not available"
+  docker_cli info >/dev/null 2>&1 \
+    || skip "docker context $DOCKER_CONTEXT is unavailable"
+}
+
+assert_success() {
+  [ "$status" -eq 0 ]
+}
+
+assert_output() {
+  if [ "$1" = "--partial" ]; then
+    [[ "$output" == *"$2"* ]]
+  else
+    [ "$output" = "$1" ]
+  fi
 }
 
 @test "install manifest maps etc to root and systemd units to lib/systemd/system" {
@@ -118,11 +147,11 @@ setup() {
   head -1 "$f" | grep -Eq '^parental-guard \(0\.1\.0-1\) '
 }
 
-@test "control declares parental-guard Architecture: all with runtime deps" {
+@test "control declares parental-guard Architecture: any with runtime deps" {
   f="$PARENTAL_OS_ROOT/packages/parental-guard/debian/control"
   [[ -f "$f" ]]
   grep -Eq '^Package: parental-guard$' "$f"
-  grep -Eq '^Architecture: all$' "$f"
+  grep -Eq '^Architecture: any$' "$f"
   grep -Eq '^Depends:.*\$\{misc:Depends\}' "$f"
   grep -q 'python3' "$f"
   grep -q 'sudo' "$f"
@@ -130,9 +159,11 @@ setup() {
   ! grep -Eq '^Depends:.*\bbash\b([^(]|$)' "$f"
 }
 
-@test "control build-depends on debhelper-compat 13" {
+@test "control build-depends on debhelper-compat 13, cargo, and rustc" {
   f="$PARENTAL_OS_ROOT/packages/parental-guard/debian/control"
   grep -Eq 'debhelper-compat \(= 13\)' "$f"
+  grep -q 'cargo' "$f"
+  grep -q 'rustc' "$f"
 }
 
 @test "overlays payload includes CLI, agent, both systemd units, and /etc policies/hooks" {
@@ -155,4 +186,12 @@ setup() {
   o="$PARENTAL_OS_ROOT/overlays"
   grep -q 'WantedBy=multi-user.target' "$o/usr/lib/systemd/system/parental-guard.service"
   grep -q 'WantedBy=multi-user.target' "$o/usr/lib/systemd/system/parental-guard-agent.service"
+}
+
+@test "deb package ships compiled parental-guard-agent binary in usr/lib/parental-os/" {
+  skip_if_no_docker
+  [ -f "$DEB" ]
+  run docker_cli run --rm -v "$DEB:/pkg.deb:ro" debian:bookworm dpkg -c /pkg.deb
+  assert_success
+  assert_output --partial "usr/lib/parental-os/parental-guard-agent"
 }
