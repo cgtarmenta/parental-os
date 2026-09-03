@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Create the parental-users system group idempotently.
+        if ! getent group parental-users >/dev/null 2>&1; then
+            groupadd --system parental-users
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

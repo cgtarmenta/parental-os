@@ -1,0 +1,9 @@
+etc /
+usr/bin usr/
+usr/lib/parental-os usr/lib/
+# systemd units go to /lib/systemd/system so dh_installsystemd detects them
+# and generates deb-systemd-helper enable calls (Bookworm debhelper scans
+# lib/systemd/system, not usr/lib/systemd/system). On merged-/usr the
+# installed path resolves to /usr/lib/systemd/system via the /lib symlink.
+usr/lib/systemd/system lib/systemd/
+

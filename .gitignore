@@ -16,8 +16,22 @@ srcpkgs/
 pkg/
 packages/parental-guard/arch/pkg/
 packages/parental-guard/arch/src/
+packages/parental-guard/debian/*.debhelper*
+packages/parental-guard/debian/.debhelper/
+packages/parental-guard/debian/files
+packages/parental-guard/debian/parental-guard/
+packages/parental-guard/src/
 distros/ubuntu/cache/
 distros/ubuntu/chroot/
 distros/ubuntu/binary/
 distros/ubuntu/.build/
 distros/cachyos/work/
+
+__pycache__/
+*.pyc
+
+# HP printer diagnostic log (not project-related)
+hp-check.log
+
+# Superpowers scratch and ledgers
+.superpowers/

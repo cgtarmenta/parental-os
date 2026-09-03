@@ -1,0 +1,55 @@
+# parental-os — group-based limited passwordless sudo
+# Validate: visudo -cf /etc/sudoers.d/parental-os
+
+Defaults:%parental-users !env_reset
+Defaults:%parental-users secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+Cmnd_Alias PARENTAL_GUARDED = \
+  /usr/bin/timekpr*, \
+  /usr/sbin/timekpr*, \
+  /usr/sbin/ctparental, \
+  /usr/bin/parental-guard, \
+  /usr/bin/visudo, \
+  /usr/sbin/visudo, \
+  /bin/su, /usr/bin/su, \
+  /bin/bash, /usr/bin/bash, \
+  /bin/sh, /usr/bin/sh, /usr/bin/dash, \
+  /usr/bin/zsh, /bin/zsh, /usr/bin/fish, \
+  /usr/bin/passwd, \
+  /usr/bin/timedatectl, \
+  /usr/bin/date, \
+  /usr/bin/systemctl stop parental-guard, \
+  /usr/bin/systemctl stop parental-guard.service, \
+  /usr/bin/systemctl stop parental-guard-agent, \
+  /usr/bin/systemctl stop parental-guard-agent.service, \
+  /usr/bin/systemctl stop parental-guard-enroll, \
+  /usr/bin/systemctl stop parental-guard-enroll.service, \
+  /usr/bin/systemctl disable parental-guard, \
+  /usr/bin/systemctl disable parental-guard.service, \
+  /usr/bin/systemctl disable parental-guard-agent, \
+  /usr/bin/systemctl disable parental-guard-agent.service, \
+  /usr/bin/systemctl disable parental-guard-enroll, \
+  /usr/bin/systemctl disable parental-guard-enroll.service, \
+  /usr/bin/systemctl mask parental-guard, \
+  /usr/bin/systemctl mask parental-guard.service, \
+  /usr/bin/systemctl mask parental-guard-agent, \
+  /usr/bin/systemctl mask parental-guard-agent.service, \
+  /usr/bin/systemctl mask parental-guard-enroll, \
+  /usr/bin/systemctl mask parental-guard-enroll.service, \
+  /usr/bin/systemctl stop timekpr, \
+  /usr/bin/systemctl stop timekpr-admin, \
+  /usr/bin/systemctl disable timekpr, \
+  /usr/bin/systemctl disable timekpr-admin, \
+  /usr/bin/systemctl mask timekpr, \
+  /usr/bin/systemctl mask timekpr-admin, \
+  /usr/bin/apt remove parental-guard, \
+  /usr/bin/apt purge parental-guard, \
+  /usr/bin/apt-get remove parental-guard, \
+  /usr/bin/apt-get purge parental-guard, \
+  /usr/bin/dpkg -r parental-guard, \
+  /usr/bin/dpkg --purge parental-guard, \
+  /usr/bin/pacman -R parental-guard, \
+  /usr/bin/pacman -Rns parental-guard
+
+# Allow everyday admin via sudo, except guarded commands.
+%parental-users ALL=(ALL) NOPASSWD: ALL, !PARENTAL_GUARDED

@@ -1,0 +1,13 @@
+[Unit]
+Description=parental-os guard presence check
+After=multi-user.target
+Wants=parental-guard-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/parental-guard status
+RefuseManualStop=false
+
+[Install]
+WantedBy=multi-user.target
