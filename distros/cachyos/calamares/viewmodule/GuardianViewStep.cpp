@@ -12,6 +12,10 @@
 #include "JobQueue.h"
 #include "utils/Logger.h"
 
+#include <QDir>
+#include <QFile>
+#include <sys/stat.h>
+
 CALAMARES_PLUGIN_FACTORY_DEFINITION( GuardianViewStepFactory, registerPlugin< GuardianViewStep >(); )
 
 GuardianViewStep::GuardianViewStep( QObject* parent )
