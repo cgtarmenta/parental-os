@@ -197,6 +197,39 @@ stage_official_tree() {
   else
     die "unattended Calamares tree not found at $unattended_src"
   fi
+
+  # Stage guardian secret setup prompt, live session autostart, and desktop launcher wrapper
+  local guardian_prompt_src="$REPO_DIR/overlays/usr/lib/parental-os/guardian-setup-prompt.sh"
+  if [[ -f "$guardian_prompt_src" ]]; then
+    mkdir -p "$airootfs/usr/lib/parental-os" "$airootfs/etc/xdg/autostart" "$airootfs/usr/local/bin"
+    cp -f "$guardian_prompt_src" "$airootfs/usr/lib/parental-os/guardian-setup-prompt.sh"
+    chmod 755 "$airootfs/usr/lib/parental-os/guardian-setup-prompt.sh"
+
+    cat > "$airootfs/etc/xdg/autostart/parental-guardian-prompt.desktop" <<'AUTOSTART_EOF'
+[Desktop Entry]
+Type=Application
+Name=Parental OS Guardian Setup
+Comment=Prompt for guardian secret during live session
+Exec=/usr/lib/parental-os/guardian-setup-prompt.sh
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+AUTOSTART_EOF
+    chmod 644 "$airootfs/etc/xdg/autostart/parental-guardian-prompt.desktop"
+
+    cat > "$airootfs/usr/lib/parental-os/desktop-launcher-wrapper.sh" <<'WRAPPER_EOF'
+#!/bin/bash
+# Wrapper to ensure guardian secret prompt runs when desktop launcher executes
+if [[ -x /usr/lib/parental-os/guardian-setup-prompt.sh ]]; then
+  /usr/lib/parental-os/guardian-setup-prompt.sh || true
+fi
+if [[ $# -gt 0 ]]; then
+  exec "$@"
+fi
+WRAPPER_EOF
+    chmod 755 "$airootfs/usr/lib/parental-os/desktop-launcher-wrapper.sh"
+    ln -sfn /usr/lib/parental-os/desktop-launcher-wrapper.sh "$airootfs/usr/local/bin/parental-desktop-launcher"
+  fi
 }
 
 stage_profile() {
@@ -354,6 +387,39 @@ run_official_build() {
   ln -sfn "/usr/lib/systemd/system/gdm.service" "$overlay_dir/etc/systemd/system/display-manager.service"
   ln -sfn "/usr/lib/systemd/system/gdm.service" "$graph_wants_dir/gdm.service"
 
+  # Wire guardian setup prompt into live session autostart and desktop launcher wrapper
+  local guardian_prompt_src="$REPO_DIR/overlays/usr/lib/parental-os/guardian-setup-prompt.sh"
+  mkdir -p "$overlay_dir/usr/lib/parental-os" "$overlay_dir/etc/xdg/autostart" "$overlay_dir/usr/local/bin"
+  if [[ -f "$guardian_prompt_src" ]]; then
+    cp -f "$guardian_prompt_src" "$overlay_dir/usr/lib/parental-os/guardian-setup-prompt.sh"
+    chmod 755 "$overlay_dir/usr/lib/parental-os/guardian-setup-prompt.sh"
+  fi
+
+  cat > "$overlay_dir/etc/xdg/autostart/parental-guardian-prompt.desktop" <<'AUTOSTART_EOF'
+[Desktop Entry]
+Type=Application
+Name=Parental OS Guardian Setup
+Comment=Prompt for guardian secret during live session
+Exec=/usr/lib/parental-os/guardian-setup-prompt.sh
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+AUTOSTART_EOF
+  chmod 644 "$overlay_dir/etc/xdg/autostart/parental-guardian-prompt.desktop"
+
+  cat > "$overlay_dir/usr/lib/parental-os/desktop-launcher-wrapper.sh" <<'WRAPPER_EOF'
+#!/bin/bash
+# Wrapper to ensure guardian secret prompt runs when desktop launcher executes
+if [[ -x /usr/lib/parental-os/guardian-setup-prompt.sh ]]; then
+  /usr/lib/parental-os/guardian-setup-prompt.sh || true
+fi
+if [[ $# -gt 0 ]]; then
+  exec "$@"
+fi
+WRAPPER_EOF
+  chmod 755 "$overlay_dir/usr/lib/parental-os/desktop-launcher-wrapper.sh"
+  ln -sfn /usr/lib/parental-os/desktop-launcher-wrapper.sh "$overlay_dir/usr/local/bin/parental-desktop-launcher"
+
   # Inject robust target provisioner to guarantee parental-guard is installed on target system
   mkdir -p "$overlay_dir/usr/lib/parental-os" "$overlay_dir/usr/lib/systemd/system"
   cat > "$overlay_dir/usr/lib/parental-os/target-provisioner.sh" <<'TARGET_EOF'
@@ -452,6 +518,24 @@ provision_target_partition() {
 
   # 5. Ensure runtime state dir exists
   mkdir -p /target/var/lib/parental-os
+
+  # Provision guardian secret hash
+  mkdir -p /target/etc/parental-os
+  if [[ -f /run/parental-os/guardian.hash && -s /run/parental-os/guardian.hash ]]; then
+    cp -f /run/parental-os/guardian.hash /target/etc/parental-os/guardian.hash
+    chmod 0600 /target/etc/parental-os/guardian.hash
+    chown 0:0 /target/etc/parental-os/guardian.hash
+    log_msg "Provisioned guardian secret hash from /run/parental-os/guardian.hash"
+  else
+    log_msg "WARNING: /run/parental-os/guardian.hash absent; generating secure random guardian hash"
+    local random_secret fallback_hash
+    random_secret="$(od -vN 32 -An -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || date +%s%N)"
+    fallback_hash="$(printf 'parental-guard:lan-v1:%s' "$random_secret" | sha256sum | awk '{print $1}')"
+    printf '%s\n' "$fallback_hash" > /target/etc/parental-os/guardian.hash
+    chmod 0600 /target/etc/parental-os/guardian.hash
+    chown 0:0 /target/etc/parental-os/guardian.hash
+    log_msg "Generated fallback random guardian hash at /target/etc/parental-os/guardian.hash"
+  fi
 
   # 6. Enable systemd units in target
   local tgt_wants="/target/etc/systemd/system/multi-user.target.wants"
