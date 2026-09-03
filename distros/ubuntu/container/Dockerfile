@@ -37,6 +37,8 @@ RUN apt-get update -qq \
       ca-certificates \
       curl \
       wget \
+      cargo \
+      rustc \
       sudo \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

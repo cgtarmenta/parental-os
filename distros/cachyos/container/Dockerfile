@@ -27,6 +27,8 @@ RUN pacman -Syu --noconfirm --needed \
       efibootmgr \
       mtools \
       libisoburn \
+      cargo \
+      rust \
       archlinux-keyring \
     && rm -rf /var/cache/pacman/pkg/*
 
