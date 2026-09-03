@@ -19,5 +19,6 @@ services:
     ports:
       - ${PARENTAL_OS_BIND_IP:-127.0.0.1}:${PARENTAL_OS_WEB_PORT:-8011}:8006
       - ${PARENTAL_OS_BIND_IP:-127.0.0.1}:${PARENTAL_OS_BROWSER_SSH_PORT:-2222}:2222
+      - ${PARENTAL_OS_BIND_IP:-127.0.0.1}:${PARENTAL_OS_BROWSER_AGENT_PORT:-7420}:7420
     restart: unless-stopped
     stop_grace_period: 30s
