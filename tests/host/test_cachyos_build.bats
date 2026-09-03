@@ -1362,3 +1362,67 @@ skip_if_no_docker() {
   grep -q 'unattended' "$f"
   grep -q 'usr/share/parental-os/unattended' "$f"
 }
+
+@test "cachyos calamares tree includes guardian setup module" {
+  [ -f "distros/cachyos/calamares/modules/guardian.conf" ]
+  [ -f "distros/cachyos/calamares/modules/main.py" ]
+}
+
+@test "cachyos calamares guardian module computes domain-separated hash from environment variable" {
+  target_root="$TEST_TMP/target"
+  mkdir -p "$target_root"
+  export CALAMARES_ROOT_MOUNT_POINT="$target_root"
+  export PARENTAL_OS_GUARDIAN_PASSWORD="testguardiansecret"
+
+  run python3 "$TEST_ROOT/distros/cachyos/calamares/modules/main.py"
+  [ "$status" -eq 0 ]
+  [ -f "$target_root/etc/parental-os/guardian.hash" ]
+  expected="$(python3 -c "import hashlib; print(hashlib.sha256(b'parental-guard:lan-v1:testguardiansecret').hexdigest())")"
+  actual="$(cat "$target_root/etc/parental-os/guardian.hash")"
+  [ "$actual" = "$expected" ]
+  mode="$(stat -c "%a" "$target_root/etc/parental-os/guardian.hash" 2>/dev/null || stat -f "%Lp" "$target_root/etc/parental-os/guardian.hash")"
+  [ "$mode" = "600" ]
+}
+
+@test "cachyos calamares guardian module generates secure random hash fallback" {
+  target_root="$TEST_TMP/target"
+  mkdir -p "$target_root"
+  export CALAMARES_ROOT_MOUNT_POINT="$target_root"
+  unset PARENTAL_OS_GUARDIAN_PASSWORD
+  unset PARENTAL_OS_GUARDIAN_HASH
+
+  run python3 "$TEST_ROOT/distros/cachyos/calamares/modules/main.py"
+  [ "$status" -eq 0 ]
+  [ -f "$target_root/etc/parental-os/guardian.hash" ]
+  actual="$(cat "$target_root/etc/parental-os/guardian.hash")"
+  [ "${#actual}" -eq 64 ]
+}
+
+@test "cachyos calamares guardian module is wired into unattended settings.conf" {
+  u="$TEST_ROOT/distros/cachyos/calamares/unattended/settings.conf"
+  [ -f "$u" ]
+  grep -q 'module:[[:space:]]*guardian' "$u"
+  grep -q 'guardian' "$u"
+}
+
+@test "cachyos build-edition stages guardian module into airootfs" {
+  f="$TEST_ROOT/distros/cachyos/container/build-edition.sh"
+  grep -q 'calamares/modules' "$f"
+  grep -q 'usr/lib/calamares/modules/guardian' "$f"
+}
+
+@test "cachyos calamares guardian module honors existing hash file" {
+  target_root="$TEST_TMP/target"
+  mkdir -p "$target_root/run/parental-os"
+  export CALAMARES_ROOT_MOUNT_POINT="$target_root"
+  unset PARENTAL_OS_GUARDIAN_PASSWORD
+  unset PARENTAL_OS_GUARDIAN_HASH
+  precomputed="11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"
+  printf '%s\n' "$precomputed" >"$target_root/run/parental-os/guardian.hash"
+
+  run python3 "$TEST_ROOT/distros/cachyos/calamares/modules/main.py"
+  [ "$status" -eq 0 ]
+  [ -f "$target_root/etc/parental-os/guardian.hash" ]
+  actual="$(cat "$target_root/etc/parental-os/guardian.hash")"
+  [ "$actual" = "$precomputed" ]
+}

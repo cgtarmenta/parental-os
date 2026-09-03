@@ -262,6 +262,16 @@ stage_official_tree() {
   mkdir -p "$staged_dir/archiso/airootfs/usr/share/calamares"
   cp -a "$calamares_dir/src" "$staged_dir/archiso/airootfs/usr/share/calamares/src"
 
+  # Stage Calamares guardian module into live ISO
+  local guardian_src="$REPO_DIR/distros/cachyos/calamares/modules"
+  if [[ -d "$guardian_src" ]]; then
+    mkdir -p "$staged_dir/archiso/airootfs/usr/lib/calamares/modules/guardian"
+    cp -a "$guardian_src/." "$staged_dir/archiso/airootfs/usr/lib/calamares/modules/guardian/"
+    mkdir -p "$staged_dir/archiso/airootfs/srv/parental-os-repo/modules/guardian"
+    cp -a "$guardian_src/." "$staged_dir/archiso/airootfs/srv/parental-os-repo/modules/guardian/"
+    log "stage_official_tree: staged Calamares guardian module"
+  fi
+
   # Ship the unattended Calamares config tree for automated target-install tests.
   # Consumed only via `calamares -c`; never wired into a shipping settings file.
   # These are config files, not executables, so archiso's default 0644 restore is
@@ -310,6 +320,7 @@ insert = (
     '        cp -r "${pacstrap_dir}/usr/share/calamares/src/modules/shellprocess/shellprocess-before-online.conf" "${pacstrap_dir}/etc/calamares/modules/shellprocess-before-online.conf" 2>/dev/null || true\n'
     '        cp -r "${pacstrap_dir}/usr/share/calamares/src/modules/services-systemd/services-systemd.conf" "${pacstrap_dir}/etc/calamares/modules/services-systemd.conf" 2>/dev/null || true\n'
     '        cp -r "${pacstrap_dir}/usr/share/calamares/src/modules/shellprocess/shellprocess_cleanup_calamares.conf" "${pacstrap_dir}/etc/calamares/modules/shellprocess_cleanup_calamares.conf" 2>/dev/null || true\n'
+    '        cp -r "${pacstrap_dir}/usr/share/calamares/src/modules/guardian/guardian.conf" "${pacstrap_dir}/etc/calamares/modules/guardian.conf" 2>/dev/null || true\n'
     '        # parental-os: downgrade boost-libs to match calamares ABI\n'
     '        # cachyos-calamares-next links libboost_python314.so.1.91.0, but pacstrap pulls 1.92.0\n'
     '        # which dropped that soname. Without this calamares crashes silently on startup.\n'
@@ -344,6 +355,12 @@ insert = (
     '          cp -a "$_parental_repo_src" "${pacstrap_dir}/srv/parental-os-repo" 2>/dev/null || true\n'
     '          mkdir -p "${pacstrap_dir}/etc/calamares/scripts"\n'
     '          cp -r "${pacstrap_dir}/srv/parental-os-repo/scripts/." "${pacstrap_dir}/etc/calamares/scripts/" 2>/dev/null || true\n'
+    '          if [[ -d "${pacstrap_dir}/srv/parental-os-repo/modules/guardian" ]]; then\n'
+    '            mkdir -p "${pacstrap_dir}/usr/lib/calamares/modules/guardian"\n'
+    '            cp -r "${pacstrap_dir}/srv/parental-os-repo/modules/guardian/." "${pacstrap_dir}/usr/lib/calamares/modules/guardian/" 2>/dev/null || true\n'
+    '            mkdir -p "${pacstrap_dir}/etc/calamares/modules"\n'
+    '            cp -f "${pacstrap_dir}/srv/parental-os-repo/modules/guardian/guardian.conf" "${pacstrap_dir}/etc/calamares/modules/guardian.conf" 2>/dev/null || true\n'
+    '          fi\n'
     '        fi\n'
     '        # Re-apply [parental-os] stanza to pacman.conf\n'
     '        printf "\\n# BEGIN parental-os temporary repository\\n[parental-os]\\nSigLevel = Optional TrustAll\\nServer = file:///srv/parental-os-repo\\n# END parental-os temporary repository\\n" >> "${pacstrap_dir}/etc/pacman.conf"\n'

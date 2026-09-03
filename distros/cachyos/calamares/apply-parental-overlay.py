@@ -343,7 +343,86 @@ def install_live_calamares_files(calamares_src_dir: Path, live_airootfs_dir: Pat
         script_dest.write_text(script_src.read_text(encoding="utf-8"), encoding="utf-8")
         script_dest.chmod(0o755)
 
+    guardian_src = calamares_src_dir / "src/modules/guardian"
+    if not guardian_src.is_dir():
+        sibling_modules = Path(__file__).resolve().parent / "modules"
+        if sibling_modules.is_dir():
+            guardian_src = sibling_modules
+
+    if guardian_src.is_dir():
+        guardian_lib = live_airootfs_dir / "usr/lib/calamares/modules/guardian"
+        guardian_lib.mkdir(parents=True, exist_ok=True)
+        for f in guardian_src.iterdir():
+            if f.is_file():
+                (guardian_lib / f.name).write_text(
+                    f.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+        guardian_conf_src = guardian_src / "guardian.conf"
+        if guardian_conf_src.is_file():
+            (modules_dir / "guardian.conf").write_text(
+                guardian_conf_src.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+
+        for live_conf in (live_etc / "settings.conf", live_etc / "settings_online.conf"):
+            if live_conf.is_file():
+                wire_guardian_to_settings(live_conf)
+
     print(f"apply-parental-overlay: installed live Calamares files under {live_etc}")
+
+
+def stage_guardian_module(calamares_src_dir: Path) -> None:
+    """Stage guardian Calamares module files into Calamares source tree."""
+    modules_src = Path(__file__).resolve().parent / "modules"
+    if not modules_src.is_dir():
+        return
+    dest_dir = calamares_src_dir / "src/modules/guardian"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for f in modules_src.iterdir():
+        if f.is_file():
+            dest_file = dest_dir / f.name
+            dest_file.write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"apply-parental-overlay: staged guardian module in {dest_dir}")
+
+
+def wire_guardian_to_settings(conf_path: Path) -> None:
+    """Wire guardian module into Calamares settings exec sequence."""
+    content = load_yaml(conf_path)
+    if "- guardian" in content:
+        return
+
+    # Look for exec sequence insertion points
+    for marker in ("- services-systemd", "- users"):
+        pattern = rf"(\n\s*{re.escape(marker)}\b)"
+        match = re.search(pattern, content)
+        if match:
+            indent_m = re.search(r"\n(\s*)" + re.escape(marker), content)
+            indent = indent_m.group(1) if indent_m else "  "
+            insertion = f"\n{indent}- guardian"
+            new_content = content[:match.end()] + insertion + content[match.end():]
+            conf_path.write_text(new_content, encoding="utf-8")
+            print(f"apply-parental-overlay: wired guardian into {conf_path}")
+            return
+
+    for marker in ("- shellprocess@cleanup_calamares", "- umount"):
+        pattern = rf"(\n\s*{re.escape(marker)}\b)"
+        match = re.search(pattern, content)
+        if match:
+            indent_m = re.search(r"\n(\s*)" + re.escape(marker), content)
+            indent = indent_m.group(1) if indent_m else "  "
+            insertion = f"{indent}- guardian\n"
+            new_content = content[:match.start() + 1] + insertion + content[match.start() + 1:]
+            conf_path.write_text(new_content, encoding="utf-8")
+            print(f"apply-parental-overlay: wired guardian into {conf_path}")
+            return
+
+
+def wire_guardian_module(calamares_src_dir: Path) -> None:
+    """Wire guardian module into all settings files in calamares source."""
+    settings_files = list(calamares_src_dir.glob("settings*.conf")) + \
+                     list((calamares_src_dir / "src").glob("settings*.conf"))
+    for conf_path in settings_files:
+        if conf_path.is_file():
+            wire_guardian_to_settings(conf_path)
 
 
 def patch_calamares_online(
@@ -460,6 +539,8 @@ def transform_source(calamares_src_dir: Path) -> None:
     install_target_repo_copy(calamares_src_dir)
     install_target_cleanup(calamares_src_dir)
     wire_shellprocess_cleanup(calamares_src_dir)
+    stage_guardian_module(calamares_src_dir)
+    wire_guardian_module(calamares_src_dir)
 
 
 def main() -> int:
