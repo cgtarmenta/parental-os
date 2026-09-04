@@ -17,9 +17,12 @@ pub async fn lock_screen(
     if !check_auth(&headers, expected.as_deref()) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    // Invoke loginctl lock-sessions asynchronously
-    let status = tokio::process::Command::new("loginctl")
-        .arg("lock-sessions")
+    let lock_cmd = std::env::var("PARENTAL_OS_LOCK_CMD").unwrap_or_else(|_| "loginctl".to_string());
+    let mut cmd = tokio::process::Command::new(&lock_cmd);
+    if lock_cmd == "loginctl" {
+        cmd.arg("lock-sessions");
+    }
+    let status = cmd
         .status()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

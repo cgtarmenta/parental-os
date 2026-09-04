@@ -39,6 +39,7 @@ async fn test_status_requires_valid_bearer() {
 
 #[tokio::test]
 async fn test_action_lock_requires_valid_bearer() {
+    std::env::set_var("PARENTAL_OS_LOCK_CMD", "true");
     let secret_hash = "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b";
     let app = parental_guard_agent::app(Some(secret_hash.to_string()));
 
@@ -54,6 +55,7 @@ async fn test_action_lock_requires_valid_bearer() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+    std::env::remove_var("PARENTAL_OS_LOCK_CMD");
 }
 
 #[tokio::test]
