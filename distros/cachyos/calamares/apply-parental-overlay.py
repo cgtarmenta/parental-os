@@ -343,7 +343,135 @@ def install_live_calamares_files(calamares_src_dir: Path, live_airootfs_dir: Pat
         script_dest.write_text(script_src.read_text(encoding="utf-8"), encoding="utf-8")
         script_dest.chmod(0o755)
 
+    guardian_src = calamares_src_dir / "src/modules/guardian"
+    if not guardian_src.is_dir():
+        sibling_viewmodule = Path(__file__).resolve().parent / "viewmodule"
+        sibling_modules = Path(__file__).resolve().parent / "modules"
+        if sibling_viewmodule.is_dir():
+            guardian_src = sibling_viewmodule
+        elif sibling_modules.is_dir():
+            guardian_src = sibling_modules
+
+    if guardian_src.is_dir():
+        guardian_lib = live_airootfs_dir / "usr/lib/calamares/modules/guardian"
+        guardian_lib.mkdir(parents=True, exist_ok=True)
+        for f in guardian_src.iterdir():
+            if f.is_file():
+                (guardian_lib / f.name).write_text(
+                    f.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+        guardian_conf_src = guardian_src / "guardian.conf"
+        if guardian_conf_src.is_file():
+            (modules_dir / "guardian.conf").write_text(
+                guardian_conf_src.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+
+        for live_conf in (
+            live_etc / "settings.conf",
+            live_etc / "settings_online.conf",
+            live_airootfs_dir / "usr/share/calamares/settings.conf",
+            live_airootfs_dir / "usr/share/calamares/settings_online.conf",
+        ):
+            if live_conf.is_file():
+                wire_guardian_to_settings(live_conf)
+
     print(f"apply-parental-overlay: installed live Calamares files under {live_etc}")
+
+
+def stage_guardian_module(calamares_src_dir: Path) -> None:
+    """Stage guardian Calamares module files into Calamares source tree."""
+    modules_src = Path(__file__).resolve().parent / "viewmodule"
+    if not modules_src.is_dir():
+        modules_src = Path(__file__).resolve().parent / "modules"
+    if not modules_src.is_dir():
+        return
+    dest_dir = calamares_src_dir / "src/modules/guardian"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for f in modules_src.iterdir():
+        if f.is_file():
+            dest_file = dest_dir / f.name
+            dest_file.write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"apply-parental-overlay: staged guardian module in {dest_dir}")
+
+
+def wire_guardian_to_settings(conf_path: Path) -> None:
+    """Wire guardian module into Calamares settings show and/or exec sequence."""
+    content = load_yaml(conf_path)
+    modified = False
+
+    # 1. Insert into 'show:' sequence after 'users' if not already present in show
+    show_idx = content.find("- show:")
+    exec_idx = content.find("- exec:")
+    if show_idx != -1:
+        end_of_show = exec_idx if exec_idx != -1 and exec_idx > show_idx else len(content)
+        show_block = content[show_idx:end_of_show]
+        if "- guardian" not in show_block:
+            users_match = re.search(r"(\n\s*-\s*users\b)", show_block)
+            if users_match:
+                insert_pos = show_idx + users_match.end()
+                indent_m = re.search(r"\n(\s*)-\s*users", show_block)
+                indent = indent_m.group(1) if indent_m else "  "
+                insertion = f"\n{indent}- guardian"
+                content = content[:insert_pos] + insertion + content[insert_pos:]
+                modified = True
+                exec_idx = content.find("- exec:")
+
+    # 2. Insert into 'exec:' sequence after 'users' if not already present in exec
+    if exec_idx != -1:
+        exec_block = content[exec_idx:]
+        if "- guardian" not in exec_block:
+            users_match = re.search(r"(\n\s*-\s*users\b)", exec_block)
+            if users_match:
+                insert_pos = exec_idx + users_match.end()
+                indent_m = re.search(r"\n(\s*)-\s*users", exec_block)
+                indent = indent_m.group(1) if indent_m else "  "
+                insertion = f"\n{indent}- guardian"
+                content = content[:insert_pos] + insertion + content[insert_pos:]
+                modified = True
+            else:
+                svc_match = re.search(r"(\n\s*-\s*services-systemd\b)", exec_block)
+                if svc_match:
+                    insert_pos = exec_idx + svc_match.end()
+                    indent_m = re.search(r"\n(\s*)-\s*services-systemd", exec_block)
+                    indent = indent_m.group(1) if indent_m else "  "
+                    insertion = f"\n{indent}- guardian"
+                    content = content[:insert_pos] + insertion + content[insert_pos:]
+                    modified = True
+                else:
+                    umount_match = re.search(r"(\n\s*-\s*umount\b)", exec_block)
+                    if umount_match:
+                        insert_pos = exec_idx + umount_match.start() + 1
+                        indent_m = re.search(r"\n(\s*)-\s*umount", exec_block)
+                        indent = indent_m.group(1) if indent_m else "  "
+                        insertion = f"{indent}- guardian\n"
+                        content = content[:insert_pos] + insertion + content[insert_pos:]
+                        modified = True
+
+    # 3. If there was neither show nor exec block with markers, check generic markers
+    if not modified and "- guardian" not in content:
+        for marker in ("- services-systemd", "- users"):
+            pattern = rf"(\n\s*{re.escape(marker)}\b)"
+            match = re.search(pattern, content)
+            if match:
+                indent_m = re.search(r"\n(\s*)" + re.escape(marker), content)
+                indent = indent_m.group(1) if indent_m else "  "
+                insertion = f"\n{indent}- guardian"
+                content = content[:match.end()] + insertion + content[match.end():]
+                modified = True
+                break
+
+    if modified:
+        conf_path.write_text(content, encoding="utf-8")
+        print(f"apply-parental-overlay: wired guardian into {conf_path}")
+
+
+def wire_guardian_module(calamares_src_dir: Path) -> None:
+    """Wire guardian module into all settings files in calamares source."""
+    settings_files = list(calamares_src_dir.glob("settings*.conf")) + \
+                     list((calamares_src_dir / "src").glob("settings*.conf"))
+    for conf_path in settings_files:
+        if conf_path.is_file():
+            wire_guardian_to_settings(conf_path)
 
 
 def patch_calamares_online(
@@ -460,6 +588,8 @@ def transform_source(calamares_src_dir: Path) -> None:
     install_target_repo_copy(calamares_src_dir)
     install_target_cleanup(calamares_src_dir)
     wire_shellprocess_cleanup(calamares_src_dir)
+    stage_guardian_module(calamares_src_dir)
+    wire_guardian_module(calamares_src_dir)
 
 
 def main() -> int:

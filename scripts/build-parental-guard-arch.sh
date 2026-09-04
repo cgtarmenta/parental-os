@@ -10,6 +10,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=/dev/null
 source "$ROOT/scripts/lib/common.sh"
 export PARENTAL_OS_ROOT="$ROOT"
+export PATH="${HOME:-/root}/.cargo/bin:$PATH"
 ensure_out_dirs
 require_cmd makepkg
 
@@ -21,15 +22,21 @@ PKG_STAGE="$(cd "$(dirname "$SRC_DEST")" && pwd)"
 # Sync overlays into the staging src tree.
 "$ROOT/scripts/sync-package-from-overlays.sh" "$SRC_DEST"
 
+# Stage the Rust agent crate for compilation.
+mkdir -p "$SRC_DEST/agent"
+rsync -a --exclude=target "$ROOT/packages/parental-guard/agent/" "$SRC_DEST/agent/"
+
 # Copy the PKGBUILD and install script into the staging package directory.
 mkdir -p "$PKG_STAGE"
 cp -a "$ROOT/packages/parental-guard/arch/PKGBUILD" "$PKG_STAGE/"
 cp -a "$ROOT/packages/parental-guard/arch/parental-guard.install" "$PKG_STAGE/"
 
 cd "$PKG_STAGE"
+rm -f parental-guard-*.pkg.tar.*
 makepkg -f --nodeps 2>&1 | tee "$OUT/logs/parental-guard-arch-makepkg.log"
 
 shopt -s nullglob
+rm -f "$OUT/packages"/parental-guard-*.pkg.tar.*
 for f in parental-guard-*.pkg.tar.*; do
   cp -f "$f" "$OUT/packages/"
 done

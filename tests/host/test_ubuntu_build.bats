@@ -22,6 +22,19 @@ teardown() {
 # Helpers
 # ---------------------------------------------------------------------------
 
+assert_success() {
+  [ "$status" -eq 0 ]
+}
+
+assert_failure() {
+  [ "$status" -ne 0 ]
+}
+
+assert_equal() {
+  [ "$1" = "$2" ]
+}
+
+
 _make_fake_git() {
   local bindir="$1"
   local sha="$2"
@@ -969,5 +982,74 @@ EOF
   grep -Eq 'minimal\.standard\.live\.custom\.squashfs' "$f"
   grep -Eq 'layerfs-path=minimal\.standard\.live\.custom\.squashfs' "$f"
   grep -Eq 'target-provisioner\.sh' "$f"
+  grep -Eq 'target-watcher\.sh' "$f"
 }
+
+# ---------------------------------------------------------------------------
+# Guardian setup prompt & provisioning (Task 5)
+# ---------------------------------------------------------------------------
+
+@test "guardian-setup-prompt generates valid domain-separated hash non-interactively when env set" {
+  export PARENTAL_OS_GUARDIAN_PASSWORD="testpassword"
+  export PARENTAL_OS_HASH_OUT="/tmp/test_guardian.hash"
+  rm -f "$PARENTAL_OS_HASH_OUT"
+  run bash overlays/usr/lib/parental-os/guardian-setup-prompt.sh --headless
+  assert_success
+  [ -f "$PARENTAL_OS_HASH_OUT" ]
+  expected_hash=$(python3 -c "import hashlib; print(hashlib.sha256(b'parental-guard:lan-v1:testpassword').hexdigest())")
+  actual_hash=$(cat "$PARENTAL_OS_HASH_OUT")
+  assert_equal "$actual_hash" "$expected_hash"
+}
+
+@test "guardian-setup-prompt sets permissions to 0600 on output hash file" {
+  export PARENTAL_OS_GUARDIAN_PASSWORD="modepassword"
+  export PARENTAL_OS_HASH_OUT="$TEST_TMP/perm_guardian.hash"
+  rm -f "$PARENTAL_OS_HASH_OUT"
+  run bash overlays/usr/lib/parental-os/guardian-setup-prompt.sh --headless
+  assert_success
+  [ -f "$PARENTAL_OS_HASH_OUT" ]
+  mode=$(stat -c "%a" "$PARENTAL_OS_HASH_OUT" 2>/dev/null || stat -f "%Lp" "$PARENTAL_OS_HASH_OUT")
+  assert_equal "$mode" "600"
+}
+
+@test "guardian-setup-prompt generates valid random hash in headless mode when password unset" {
+  unset PARENTAL_OS_GUARDIAN_PASSWORD || true
+  export PARENTAL_OS_HASH_OUT="$TEST_TMP/random_guardian.hash"
+  rm -f "$PARENTAL_OS_HASH_OUT"
+  run bash overlays/usr/lib/parental-os/guardian-setup-prompt.sh --headless
+  assert_success
+  [ -f "$PARENTAL_OS_HASH_OUT" ]
+  actual_hash=$(cat "$PARENTAL_OS_HASH_OUT")
+  [[ "$actual_hash" =~ ^[0-9a-f]{64}$ ]]
+}
+
+@test "guardian-setup-prompt accepts --password and --out flags" {
+  out_file="$TEST_TMP/cli_guardian.hash"
+  rm -f "$out_file"
+  run bash overlays/usr/lib/parental-os/guardian-setup-prompt.sh -p "clipassword" -o "$out_file"
+  assert_success
+  [ -f "$out_file" ]
+  expected_hash=$(python3 -c "import hashlib; print(hashlib.sha256(b'parental-guard:lan-v1:clipassword').hexdigest())")
+  actual_hash=$(cat "$out_file")
+  assert_equal "$actual_hash" "$expected_hash"
+}
+
+@test "Ubuntu build-edition.sh wires guardian-setup-prompt, autostart, and desktop launcher wrapper" {
+  f="$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+  [ -f "$f" ]
+  grep -Eq 'guardian-setup-prompt\.sh' "$f"
+  grep -Eq 'parental-guardian-prompt\.desktop' "$f"
+  grep -Eq 'desktop-launcher-wrapper\.sh' "$f"
+}
+
+@test "Ubuntu build-edition.sh target provisioner persists /run/parental-os/guardian.hash to target" {
+  f="$TEST_ROOT/distros/ubuntu/container/build-edition.sh"
+  [ -f "$f" ]
+  grep -Fq '/run/parental-os/guardian.hash' "$f"
+  grep -Fq '/target/etc/parental-os/guardian.hash' "$f"
+  grep -Fq 'chmod 0600 /target/etc/parental-os/guardian.hash' "$f"
+  grep -Fq 'chown 0:0 /target/etc/parental-os/guardian.hash' "$f"
+}
+
+
 

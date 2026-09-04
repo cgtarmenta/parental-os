@@ -55,7 +55,7 @@ QEMU_ARGS=(
   -smp "$CPUS"
   -boot "$BOOT_ORDER"
   -drive "file=$DISK,if=virtio,format=qcow2"
-  -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22"
+  -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${AGENT_PORT:-7420}-:7420"
   -device virtio-net-pci,netdev=net0
   -vga virtio
   -display none

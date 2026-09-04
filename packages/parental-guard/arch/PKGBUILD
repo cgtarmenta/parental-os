@@ -3,12 +3,18 @@ pkgname=parental-guard
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="parental-os guard placeholder (sudo/polkit/agent stub)"
-arch=('any')
+arch=('x86_64' 'aarch64')
 url="https://github.com/cgtarmenta/parental-os"
 license=('MIT')
 depends=('bash' 'python' 'sudo' 'polkit' 'systemd')
+makedepends=('cargo' 'rust')
 source=()
 install=parental-guard.install
+
+build() {
+  cd "$srcdir/agent"
+  cargo build --release --locked
+}
 
 package() {
   local root="$startdir/src"
@@ -21,6 +27,17 @@ package() {
     fi
   fi
   cp -a "$root"/* "$pkgdir"/
+  rm -rf "$pkgdir/agent"
   chmod 440 "$pkgdir/etc/sudoers.d/parental-os"
   mkdir -p "$pkgdir/var/lib/parental-os"
+
+  local src="${srcdir:-$startdir/src}"
+  if [[ -f "$src/agent/target/release/parental-guard-agent" ]]; then
+    install -Dm755 "$src/agent/target/release/parental-guard-agent" "$pkgdir/usr/lib/parental-os/parental-guard-agent"
+  elif [[ -n "${PARENTAL_OS_ROOT:-}" && -f "$PARENTAL_OS_ROOT/packages/parental-guard/agent/target/release/parental-guard-agent" ]]; then
+    install -Dm755 "$PARENTAL_OS_ROOT/packages/parental-guard/agent/target/release/parental-guard-agent" "$pkgdir/usr/lib/parental-os/parental-guard-agent"
+  else
+    error "parental-guard-agent binary not found"
+    return 1
+  fi
 }
