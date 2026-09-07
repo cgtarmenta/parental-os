@@ -120,20 +120,20 @@
 - Create: `scripts/build-ubuntu.sh`
 - Test: `tests/host/test_ubuntu_build.bats`
 
-- [ ] **Step 1: Write failing tests for build driver**
+- [x] **Step 1: Write failing tests for build driver**
   Assert:
   - `scripts/build-ubuntu.sh` resolves upstream refs, writes provenance to `out/ubuntu/desktop/provenance.json`, checks out staging repos, and launches the builder container with private mount propagation.
   - `distros/ubuntu/container/build-edition.sh` builds `parental-guard_0.1.0-1_all.deb`, sets up local repo, applies transformer, and runs image generation.
 
-- [ ] **Step 2: Implement `distros/ubuntu/container/build-edition.sh` and `scripts/build-ubuntu.sh`**
+- [x] **Step 2: Implement `distros/ubuntu/container/build-edition.sh` and `scripts/build-ubuntu.sh`**
   Implement complete build orchestration matching the CachyOS pattern.
 
-- [ ] **Step 3: Test host script syntax and contracts**
+- [x] **Step 3: Test host script syntax and contracts**
   ```bash
   bats tests/host/test_ubuntu_build.bats
   ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
   ```bash
   git add distros/ubuntu/container/build-edition.sh scripts/build-ubuntu.sh tests/host/test_ubuntu_build.bats
   git commit -m "feat(ubuntu): implement host build driver and containerized build entrypoint"
@@ -151,25 +151,25 @@
 - Modify: `tests/qemu/assert_target.sh`
 - Test: `tests/host/test_unattended_install.bats`
 
-- [ ] **Step 1: Write tests for unattended install tree**
+- [x] **Step 1: Write tests for unattended install tree**
   Assert:
   - `distros/ubuntu/calamares/unattended/settings.conf` enables `autoProceed` per show step and sets `quit-at-end: true`.
   - `partition.conf` selects erase partitioning.
   - `finished.conf` executes poweroff as success oracle.
 
-- [ ] **Step 2: Implement unattended configuration files**
+- [x] **Step 2: Implement unattended configuration files**
   Create the test-only configuration files.
 
-- [ ] **Step 3: Update `scripts/test-install.sh` and target assertions**
+- [x] **Step 3: Update `scripts/test-install.sh` and target assertions**
   Ensure `just test-install ubuntu` drives the unattended installation and executes `assert_target.sh` over SSH on the installed system.
 
-- [ ] **Step 4: Run full host test suite**
+- [x] **Step 4: Run full host test suite**
   ```bash
   just test-host
   ```
   Ensure all tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   ```bash
   git add distros/ubuntu/calamares/unattended/ scripts/test-install.sh tests/qemu/assert_target.sh tests/host/
   git commit -m "feat(ubuntu): add unattended install config and target assertion harness"
